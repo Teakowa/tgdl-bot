@@ -1,0 +1,25 @@
+services:
+  bot:
+    image: golang:1.23
+    working_dir: /app
+    command: ["/bin/sh", "-lc", "./scripts/run-bot.sh"]
+    env_file:
+      - ../.env
+    volumes:
+      - ..:/app
+      - tgdl-data:/app/data
+    depends_on:
+      - downloader
+
+  downloader:
+    image: golang:1.23
+    working_dir: /app
+    command: ["/bin/sh", "-lc", "./scripts/run-downloader.sh"]
+    env_file:
+      - ../.env
+    volumes:
+      - ..:/app
+      - tgdl-data:/app/data
+
+volumes:
+  tgdl-data:
