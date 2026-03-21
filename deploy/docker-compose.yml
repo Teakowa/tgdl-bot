@@ -12,11 +12,9 @@ services:
     environment:
       APP_MODE: bot
       TDL_BIN: /usr/local/bin/tdl
-      DOWNLOAD_DIR: /downloads
       SQLITE_PATH: /app/data/tasks.db
     volumes:
       - tgdl-data:/app/data
-      - tgdl-downloads:/downloads
       - tgdl-tdl-session:/root/.tdl
     restart: unless-stopped
 
@@ -28,15 +26,12 @@ services:
     environment:
       APP_MODE: downloader
       TDL_BIN: /usr/local/bin/tdl
-      DOWNLOAD_DIR: /downloads
       SQLITE_PATH: /app/data/tasks.db
     volumes:
       - tgdl-data:/app/data
-      - tgdl-downloads:/downloads
       - tgdl-tdl-session:/root/.tdl
     restart: unless-stopped
 
 volumes:
   tgdl-data:
-  tgdl-downloads:
   tgdl-tdl-session:

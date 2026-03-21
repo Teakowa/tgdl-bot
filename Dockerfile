@@ -17,7 +17,6 @@ ARG TDL_VERSION=v0.20.1
 
 ENV APP_MODE=bot
 ENV TDL_BIN=/usr/local/bin/tdl
-ENV DOWNLOAD_DIR=/downloads
 ENV SQLITE_PATH=/app/data/tasks.db
 
 RUN apt-get update \
@@ -42,9 +41,9 @@ COPY --from=builder /out/tgdl-downloader /usr/local/bin/tgdl-downloader
 COPY scripts/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 
 RUN chmod +x /usr/local/bin/docker-entrypoint.sh \
-    && mkdir -p /app/data /downloads
+    && mkdir -p /app/data
 
-VOLUME ["/app/data", "/downloads"]
+VOLUME ["/app/data"]
 
 ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
 CMD ["bot"]

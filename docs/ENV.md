@@ -26,11 +26,6 @@ All configuration is read from environment variables.
 - `TDL_STORAGE`: optional `tdl` storage value
 - `TDL_LOGIN_REQUIRED`: optional boolean, defaults to `true`
 - `TDL_LOGIN_CHECK_ON_START`: optional boolean, defaults to `true`
-- `DOWNLOAD_DIR`: required directory for downloaded files
-- `TDL_GROUP`: optional boolean, defaults to `true`
-- `TDL_SKIP_SAME`: optional boolean, defaults to `true`
-- `TDL_TASK_CONCURRENCY`: optional `tdl -l` concurrency, defaults to `1`
-- `TDL_THREAD_CONCURRENCY`: optional `tdl -t` concurrency, defaults to `4`
 - `DOWNLOADER_WORKERS`: optional worker count, defaults to `2`
 - `TASK_TIMEOUT_MINUTES`: optional per-task timeout, defaults to `60`
 
@@ -43,12 +38,12 @@ All configuration is read from environment variables.
 - `LOG_LEVEL`: optional log level
 - `ENV`: optional runtime environment name
 
-## Phase 1 defaults
+## Phase 2 defaults
 
-The phase 1 scaffold assumes:
+The phase 2 scaffold assumes:
 
 - long polling for the bot unless webhook mode is explicitly enabled
 - a single local SQLite database
 - one `tdl` namespace per downloader deployment
 - no interactive login at runtime
-
+- forward target defaults to sender context

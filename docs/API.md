@@ -1,6 +1,6 @@
 # API
 
-Phase 1 scope only.
+Phase 2 forwarding scope only.
 
 ## External APIs
 
@@ -18,7 +18,7 @@ Used by the bot service to enqueue tasks and by the downloader service to pull t
 
 ### `tdl`
 
-Used by the downloader service to perform the actual download work.
+Used by the downloader service to perform message forward work.
 
 ## Internal data contracts
 
@@ -29,11 +29,8 @@ Used by the downloader service to perform the actual download work.
   "task_id": "uuid",
   "chat_id": 123456789,
   "user_id": 123456789,
+  "target_chat_id": 123456789,
   "url": "https://t.me/c/xxx/123",
-  "options": {
-    "group": true,
-    "skip_same": true
-  },
   "created_at": "2026-03-21T00:00:00Z"
 }
 ```
@@ -51,7 +48,6 @@ Used by the downloader service to perform the actual download work.
 - `finished_at`
 - `retry_count`
 - `lease_id`
-- `download_dir`
 - `output_summary`
 - `error_message`
 - `exit_code`
@@ -66,11 +62,10 @@ Used by the downloader service to perform the actual download work.
 - `retrying`
 - `dead_lettered`
 
-## Phase 1 behavior summary
+## Phase 2 behavior summary
 
 - Bot accepts Telegram URLs only.
-- Bot persists a queued task before enqueueing to Cloudflare Queue.
+- Bot persists a queued forward task before enqueueing to Cloudflare Queue.
 - Downloader performs session preflight before pulling tasks.
 - Downloader uses `exec.CommandContext` for `tdl`.
 - Downloader captures stdout, stderr, exit code, and timeout behavior.
-

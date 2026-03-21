@@ -826,11 +826,11 @@ Downloader Service 必须实现固定 worker 池：
 ### Phase 2
 
 * Webhook 模式
-* DLQ 可视化处理
-* 更完善的输出解析
+* 消息完整转发执行链路（URL -> queue -> tdl forward）
+* 转发结果解析与状态回传增强
 * 管理员命令
 * 按用户限流
-* 指定下载目录策略
+* DLQ 可视化处理（面向转发失败重试）
 
 ### Phase 3
 

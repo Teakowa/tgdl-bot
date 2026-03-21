@@ -1,6 +1,6 @@
 # TGDL Bot
 
-Go-based Telegram download bot and downloader scaffold for the phase 1 spec.
+Go-based Telegram message forwarding bot and downloader scaffold for the phase 2 spec.
 
 ## What this repo contains
 
@@ -15,7 +15,6 @@ Go-based Telegram download bot and downloader scaffold for the phase 1 spec.
 - `tdl` installed and available on `PATH`
 - Telegram bot token
 - Cloudflare Queue credentials
-- A writable download directory
 - SQLite storage path
 
 ## Required deployment step
@@ -56,6 +55,7 @@ Make sure `tdl login` has been completed first, then start the downloader:
 ```
 
 The downloader performs a session preflight check before it begins consuming the queue.
+The execution model is: `message URL -> queue -> tdl forward`.
 
 ## Docker build and run
 
@@ -94,3 +94,4 @@ This login state is persisted in Docker volumes (`tgdl-data` and `tgdl-tdl-sessi
 - The downloader must not consume tasks until `tdl` session preflight succeeds.
 - SQLite is used as the local task store; keep the database on persistent storage.
 - This phase does not include a web UI, object storage, or worker-based deployment.
+- Bot accepts Telegram message URLs only and creates forward tasks.

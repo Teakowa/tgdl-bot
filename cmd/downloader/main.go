@@ -39,7 +39,6 @@ func (h startupPreflightHook) Check(ctx context.Context, cfg config.Config) erro
 	checker := dl.StartupPreflight{Runner: h.runner}
 	return checker.Check(ctx, dl.StartupConfig{
 		Binary:        cfg.Downloader.Bin,
-		DownloadDir:   cfg.Downloader.DownloadDir,
 		Namespace:     cfg.Downloader.Namespace,
 		Storage:       cfg.Downloader.Storage,
 		LoginRequired: cfg.Downloader.LoginRequired && cfg.Downloader.LoginCheckOnStart,
@@ -91,7 +90,6 @@ func run(ctx context.Context, cfg config.Config, logger *slog.Logger, preflight 
 
 	logger.Info("downloader entrypoint initialized",
 		"env", cfg.Environment,
-		"download_dir", cfg.Downloader.DownloadDir,
 		"queue_id", cfg.Cloudflare.QueueID,
 	)
 

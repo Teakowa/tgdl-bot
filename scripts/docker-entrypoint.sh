@@ -3,7 +3,7 @@ set -eu
 
 mode="${APP_MODE:-${1:-bot}}"
 
-mkdir -p /app/data /downloads
+mkdir -p /app/data
 
 case "$mode" in
   bot)
@@ -17,4 +17,3 @@ case "$mode" in
     exit 64
     ;;
 esac
-

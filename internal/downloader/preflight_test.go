@@ -21,13 +21,11 @@ func (r fakeRunner) BuildCommand(context.Context, DownloadRequest) (*exec.Cmd, e
 }
 
 func TestStartupPreflightRequiresReadyWhenLoginRequired(t *testing.T) {
-	tmp := t.TempDir()
 	p := StartupPreflight{
 		Runner: fakeRunner{state: SessionStateInvalid},
 	}
 	err := p.Check(context.Background(), StartupConfig{
 		Binary:        "sh",
-		DownloadDir:   tmp,
 		Namespace:     "default",
 		LoginRequired: true,
 	})
@@ -37,13 +35,11 @@ func TestStartupPreflightRequiresReadyWhenLoginRequired(t *testing.T) {
 }
 
 func TestStartupPreflightPassesWithReadySession(t *testing.T) {
-	tmp := t.TempDir()
 	p := StartupPreflight{
 		Runner: fakeRunner{state: SessionStateReady},
 	}
 	err := p.Check(context.Background(), StartupConfig{
 		Binary:        "sh",
-		DownloadDir:   tmp,
 		Namespace:     "default",
 		LoginRequired: true,
 	})
@@ -53,13 +49,11 @@ func TestStartupPreflightPassesWithReadySession(t *testing.T) {
 }
 
 func TestStartupPreflightPropagatesRunnerError(t *testing.T) {
-	tmp := t.TempDir()
 	p := StartupPreflight{
 		Runner: fakeRunner{err: errors.New("session probe failed")},
 	}
 	err := p.Check(context.Background(), StartupConfig{
 		Binary:        "sh",
-		DownloadDir:   tmp,
 		Namespace:     "default",
 		LoginRequired: false,
 	})

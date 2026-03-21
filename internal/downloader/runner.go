@@ -5,7 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os/exec"
-	"strconv"
+	"regexp"
 	"time"
 )
 
@@ -20,15 +20,11 @@ const (
 )
 
 type DownloadRequest struct {
-	URL               string
-	DownloadDir       string
-	Binary            string
-	Namespace         string
-	Storage           string
-	Group             bool
-	SkipSame          bool
-	TaskConcurrency   int
-	ThreadConcurrency int
+	URL          string
+	TargetChatID int64
+	Binary       string
+	Namespace    string
+	Storage      string
 }
 
 type RunResult struct {
@@ -71,7 +67,7 @@ func (r DefaultRunner) BuildCommand(ctx context.Context, req DownloadRequest) (*
 	if r.CommandBuilder != nil {
 		return r.CommandBuilder.BuildCommand(ctx, req)
 	}
-	return buildDownloadCommand(ctx, req)
+	return buildForwardCommand(ctx, req)
 }
 
 type commandBuilder struct{}
@@ -81,11 +77,11 @@ func NewCommandBuilder() CommandBuilder {
 }
 
 func (commandBuilder) BuildCommand(ctx context.Context, req DownloadRequest) (*exec.Cmd, error) {
-	return buildDownloadCommand(ctx, req)
+	return buildForwardCommand(ctx, req)
 }
 
-func buildDownloadCommand(ctx context.Context, req DownloadRequest) (*exec.Cmd, error) {
-	args, err := buildDownloadArgs(req)
+func buildForwardCommand(ctx context.Context, req DownloadRequest) (*exec.Cmd, error) {
+	args, err := buildForwardArgs(req)
 	if err != nil {
 		return nil, err
 	}
@@ -99,28 +95,27 @@ func buildDownloadCommand(ctx context.Context, req DownloadRequest) (*exec.Cmd, 
 	return cmd, nil
 }
 
-func buildDownloadArgs(req DownloadRequest) ([]string, error) {
+var telegramURLPartsPattern = regexp.MustCompile(`^https?://(?:t\.me|telegram\.me)/(?:c/\d+/|[A-Za-z0-9_]+/)(\d+)$`)
+
+func buildForwardArgs(req DownloadRequest) ([]string, error) {
 	if req.URL == "" {
 		return nil, errors.New("downloader: URL is required")
 	}
-	if req.DownloadDir == "" {
-		return nil, errors.New("downloader: download directory is required")
+	if req.TargetChatID == 0 {
+		return nil, errors.New("downloader: target chat id is required")
 	}
 
-	taskConcurrency := req.TaskConcurrency
-	if taskConcurrency <= 0 {
-		taskConcurrency = 1
+	matches := telegramURLPartsPattern.FindStringSubmatch(req.URL)
+	if len(matches) != 2 || matches[1] == "" {
+		return nil, errors.New("downloader: unsupported telegram message URL")
 	}
-
-	threadConcurrency := req.ThreadConcurrency
-	if threadConcurrency <= 0 {
-		threadConcurrency = 4
-	}
+	messageID := matches[1]
 
 	args := []string{
-		"dl",
+		"forward",
 		"-u", req.URL,
-		"-d", req.DownloadDir,
+		"--to", fmt.Sprintf("%d", req.TargetChatID),
+		"--message-id", messageID,
 	}
 
 	if req.Namespace != "" {
@@ -129,17 +124,6 @@ func buildDownloadArgs(req DownloadRequest) ([]string, error) {
 	if req.Storage != "" {
 		args = append(args, "--storage", req.Storage)
 	}
-	if req.Group {
-		args = append(args, "--group")
-	}
-	if req.SkipSame {
-		args = append(args, "--skip-same")
-	}
-
-	args = append(args,
-		"-l", strconv.Itoa(taskConcurrency),
-		"-t", strconv.Itoa(threadConcurrency),
-	)
 
 	return args, nil
 }

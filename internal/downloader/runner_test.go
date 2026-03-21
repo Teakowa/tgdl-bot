@@ -6,31 +6,24 @@ import (
 	"testing"
 )
 
-func TestBuildDownloadArgs(t *testing.T) {
-	got, err := buildDownloadArgs(DownloadRequest{
-		URL:               "https://t.me/c/123/456",
-		DownloadDir:       "/tmp/downloads",
-		Namespace:         "default",
-		Storage:           "/tmp/tdl-storage",
-		Group:             true,
-		SkipSame:          true,
-		TaskConcurrency:   1,
-		ThreadConcurrency: 4,
+func TestBuildForwardArgs(t *testing.T) {
+	got, err := buildForwardArgs(DownloadRequest{
+		URL:          "https://t.me/c/123/456",
+		TargetChatID: 999001,
+		Namespace:    "default",
+		Storage:      "/tmp/tdl-storage",
 	})
 	if err != nil {
-		t.Fatalf("buildDownloadArgs returned error: %v", err)
+		t.Fatalf("buildForwardArgs returned error: %v", err)
 	}
 
 	want := []string{
-		"dl",
+		"forward",
 		"-u", "https://t.me/c/123/456",
-		"-d", "/tmp/downloads",
+		"--to", "999001",
+		"--message-id", "456",
 		"--namespace", "default",
 		"--storage", "/tmp/tdl-storage",
-		"--group",
-		"--skip-same",
-		"-l", "1",
-		"-t", "4",
 	}
 
 	if len(got) != len(want) {
@@ -40,6 +33,15 @@ func TestBuildDownloadArgs(t *testing.T) {
 		if got[i] != want[i] {
 			t.Fatalf("arg %d mismatch: got %q want %q\n got=%v\nwant=%v", i, got[i], want[i], got, want)
 		}
+	}
+}
+
+func TestBuildForwardArgsRequiresTargetChatID(t *testing.T) {
+	_, err := buildForwardArgs(DownloadRequest{
+		URL: "https://t.me/c/123/456",
+	})
+	if err == nil {
+		t.Fatal("expected missing target chat id error")
 	}
 }
 

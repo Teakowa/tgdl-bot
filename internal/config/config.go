@@ -21,8 +21,6 @@ const (
 	defaultSQLitePath               = "./data/tasks.db"
 	defaultLogLevel                 = "info"
 	defaultEnvironment              = "dev"
-	defaultTDLTaskConcurrency       = 1
-	defaultTDLThreadConcurrency     = 4
 )
 
 type Config struct {
@@ -58,11 +56,6 @@ type DownloaderConfig struct {
 	Storage            string
 	LoginRequired      bool
 	LoginCheckOnStart  bool
-	DownloadDir        string
-	Group              bool
-	SkipSame           bool
-	TaskConcurrency    int
-	ThreadConcurrency  int
 	Workers            int
 	TaskTimeoutMinutes int
 }
@@ -97,11 +90,6 @@ func Load() (Config, error) {
 			Storage:            strings.TrimSpace(os.Getenv("TDL_STORAGE")),
 			LoginRequired:      getBoolEnv("TDL_LOGIN_REQUIRED", true),
 			LoginCheckOnStart:  getBoolEnv("TDL_LOGIN_CHECK_ON_START", true),
-			DownloadDir:        strings.TrimSpace(os.Getenv("DOWNLOAD_DIR")),
-			Group:              getBoolEnv("TDL_GROUP", true),
-			SkipSame:           getBoolEnv("TDL_SKIP_SAME", true),
-			TaskConcurrency:    getIntEnv("TDL_TASK_CONCURRENCY", defaultTDLTaskConcurrency),
-			ThreadConcurrency:  getIntEnv("TDL_THREAD_CONCURRENCY", defaultTDLThreadConcurrency),
 			Workers:            getIntEnv("DOWNLOADER_WORKERS", defaultDownloaderWorkers),
 			TaskTimeoutMinutes: getIntEnv("TASK_TIMEOUT_MINUTES", defaultTaskTimeoutMinutes),
 		},
@@ -117,7 +105,6 @@ func Load() (Config, error) {
 	validateRequired(&errs, "CF_ACCOUNT_ID", cfg.Cloudflare.AccountID)
 	validateRequired(&errs, "CF_QUEUE_ID", cfg.Cloudflare.QueueID)
 	validateRequired(&errs, "CF_API_TOKEN", cfg.Cloudflare.APIToken)
-	validateRequired(&errs, "DOWNLOAD_DIR", cfg.Downloader.DownloadDir)
 
 	if cfg.Telegram.UseWebhook && cfg.Telegram.WebhookURL == "" {
 		errs = append(errs, fmt.Errorf("TELEGRAM_WEBHOOK_URL is required when TELEGRAM_USE_WEBHOOK is true"))
@@ -130,12 +117,6 @@ func Load() (Config, error) {
 	}
 	if cfg.Cloudflare.QueuePullIntervalMS <= 0 {
 		errs = append(errs, fmt.Errorf("CF_QUEUE_PULL_INTERVAL_MS must be greater than zero"))
-	}
-	if cfg.Downloader.TaskConcurrency <= 0 {
-		errs = append(errs, fmt.Errorf("TDL_TASK_CONCURRENCY must be greater than zero"))
-	}
-	if cfg.Downloader.ThreadConcurrency <= 0 {
-		errs = append(errs, fmt.Errorf("TDL_THREAD_CONCURRENCY must be greater than zero"))
 	}
 	if cfg.Downloader.Workers <= 0 {
 		errs = append(errs, fmt.Errorf("DOWNLOADER_WORKERS must be greater than zero"))

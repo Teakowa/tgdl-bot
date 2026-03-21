@@ -11,7 +11,7 @@ import (
 func BuildCommandReply(cmd ParsedCommand) string {
 	switch cmd.Name {
 	case CommandStart:
-		return "欢迎使用 TGDL Bot。发送 Telegram 消息链接即可创建下载任务。"
+		return "欢迎使用 TGDL Bot。发送 Telegram 消息链接即可创建转发任务。"
 	case CommandHelp:
 		return strings.Join([]string{
 			"支持命令:",
@@ -77,7 +77,7 @@ func (h Handler) HandleText(ctx context.Context, userID, chatID int64, text stri
 		if !ok {
 			return "", nil
 		}
-		return fmt.Sprintf("任务已加入队列\nURL: %s", url), nil
+		return fmt.Sprintf("转发任务已加入队列\nURL: %s", url), nil
 	}
 }
 

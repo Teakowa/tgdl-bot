@@ -1,11 +1,11 @@
 # SPEC
 
-Phase 1 skeleton scope for TGDL Bot.
+Phase 2 forwarding scope for TGDL Bot.
 
 ## Goals
 
-- Telegram bot entrypoint for URL intake and task enqueueing
-- Downloader entrypoint for queue consumption and `tdl` execution
+- Telegram bot entrypoint for URL intake and forward task enqueueing
+- Downloader entrypoint for queue consumption and `tdl` forward execution
 - SQLite-backed task persistence
 - Basic idempotency and duplicate protection
 - Session preflight before downloader starts consuming tasks
@@ -28,9 +28,8 @@ Phase 1 skeleton scope for TGDL Bot.
 
 1. Load configuration
 2. Verify `tdl` binary exists
-3. Verify download directory is writable
-4. Verify `tdl` session namespace is available
-5. Start queue consumption only after all checks pass
+3. Verify `tdl` session namespace is available
+4. Start queue consumption only after all checks pass
 
 ## Supported bot inputs
 
@@ -65,7 +64,7 @@ Phase 1 skeleton scope for TGDL Bot.
 3. Check task state
 4. Skip and ack already completed tasks
 5. Mark task as `running`
-6. Execute `tdl`
+6. Execute `tdl` forward
 7. Persist result
 8. Ack success or retry/fail according to error type
 
@@ -82,3 +81,7 @@ Phase 1 skeleton scope for TGDL Bot.
 The downloader requires a pre-existing `tdl` login session.
 Run `tdl login` on the target machine before starting the downloader service.
 
+## Forwarding mode notes
+
+- Forward target defaults to the sender's Telegram user/chat context.
+- Bot does not expose interactive login or arbitrary destination forwarding in this phase.

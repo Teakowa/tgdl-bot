@@ -49,12 +49,12 @@ type TaskRow struct {
 	TaskID         string
 	ChatID         int64
 	UserID         int64
+	TargetChatID   int64
 	URL            string
 	Status         string
 	IdempotencyKey string
 	RetryCount     int
 	LeaseID        sql.NullString
-	DownloadDir    sql.NullString
 	OutputSummary  sql.NullString
 	ErrorMessage   sql.NullString
 	ExitCode       sql.NullInt64

@@ -18,18 +18,13 @@ type Consumer interface {
 }
 
 type Message struct {
-	TaskID      string        `json:"task_id"`
-	ChatID      int64         `json:"chat_id"`
-	UserID      int64         `json:"user_id"`
-	URL         string        `json:"url"`
-	Options     MessageOption `json:"options"`
-	CreatedAt   time.Time     `json:"created_at"`
-	Idempotency string        `json:"idempotency_key,omitempty"`
-}
-
-type MessageOption struct {
-	Group    bool `json:"group"`
-	SkipSame bool `json:"skip_same"`
+	TaskID       string    `json:"task_id"`
+	ChatID       int64     `json:"chat_id"`
+	UserID       int64     `json:"user_id"`
+	TargetChatID int64     `json:"target_chat_id"`
+	URL          string    `json:"url"`
+	CreatedAt    time.Time `json:"created_at"`
+	Idempotency  string    `json:"idempotency_key,omitempty"`
 }
 
 type ReceivedMessage struct {

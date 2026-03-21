@@ -3,7 +3,7 @@ package util
 import "testing"
 
 func TestExtractFirstTelegramURL(t *testing.T) {
-	text := "请下载这个链接 https://t.me/c/123456/789 以及其他文本"
+	text := "请转发这个链接 https://t.me/c/123456/789 以及其他文本"
 	got, ok := ExtractFirstTelegramURL(text)
 	if !ok {
 		t.Fatal("expected URL to be extracted")
