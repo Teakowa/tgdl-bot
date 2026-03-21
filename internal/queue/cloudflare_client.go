@@ -34,7 +34,10 @@ func NewCloudflareClient(accountID, queueID, apiToken string, timeout time.Durat
 }
 
 func (c *CloudflareClient) Enqueue(ctx context.Context, message Message) error {
-	return c.EnqueueBatch(ctx, []Message{message})
+	type queuePushMessage struct {
+		Body Message `json:"body"`
+	}
+	return c.postJSON(ctx, "/messages", queuePushMessage{Body: message}, nil)
 }
 
 func (c *CloudflareClient) EnqueueBatch(ctx context.Context, messages []Message) error {
@@ -49,7 +52,7 @@ func (c *CloudflareClient) EnqueueBatch(ctx context.Context, messages []Message)
 		pushMessages = append(pushMessages, queuePushMessage{Body: message})
 	}
 	payload := map[string]any{"messages": pushMessages}
-	return c.postJSON(ctx, "/messages", payload, nil)
+	return c.postJSON(ctx, "/messages/batch", payload, nil)
 }
 
 func (c *CloudflareClient) Pull(ctx context.Context, batchSize, visibilityTimeoutMs int) ([]ReceivedMessage, error) {
