@@ -185,15 +185,15 @@ func isRebuildableStatus(status service.Status) bool {
 func statusReaction(status service.Status) string {
 	switch status {
 	case service.StatusQueued:
-		return "⏳"
+		return "👀"
 	case service.StatusRunning:
-		return "⚙️"
+		return "⚡"
 	case service.StatusDone:
-		return "✅"
+		return "👍"
 	case service.StatusRetrying:
-		return "🔁"
+		return "🔥"
 	case service.StatusFailed, service.StatusDeadLettered:
-		return "❌"
+		return "👎"
 	default:
 		return ""
 	}
