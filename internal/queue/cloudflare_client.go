@@ -41,7 +41,14 @@ func (c *CloudflareClient) EnqueueBatch(ctx context.Context, messages []Message)
 	if len(messages) == 0 {
 		return nil
 	}
-	payload := map[string]any{"messages": messages}
+	type queuePushMessage struct {
+		Body Message `json:"body"`
+	}
+	pushMessages := make([]queuePushMessage, 0, len(messages))
+	for _, message := range messages {
+		pushMessages = append(pushMessages, queuePushMessage{Body: message})
+	}
+	payload := map[string]any{"messages": pushMessages}
 	return c.postJSON(ctx, "/messages", payload, nil)
 }
 
