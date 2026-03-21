@@ -4,8 +4,9 @@ import (
 	"context"
 	"errors"
 	"log/slog"
-	"strings"
 	"os/exec"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -274,4 +275,117 @@ func TestTransientKeywordsContainEOF(t *testing.T) {
 	if !strings.Contains(joined, "eof") {
 		t.Fatalf("expected eof keyword in transient keyword list, got %s", joined)
 	}
+}
+
+func TestQueuePullLoopEmitsLifecycleLogs(t *testing.T) {
+	q := &fakeQueue{}
+	tasks := &fakeTasks{
+		task: service.Task{
+			TaskID:       "t-log",
+			URL:          "https://t.me/c/1/2",
+			TargetChatID: 100,
+			Status:       service.StatusQueued,
+		},
+	}
+	capture := newLogCapture()
+	loop := queuePullLoop{
+		logger: capture.Logger(),
+		queue:  q,
+		tasks:  tasks,
+		runner: fakeRunnerImpl{build: func(ctx context.Context, _ dl.DownloadRequest) (*exec.Cmd, error) {
+			return exec.CommandContext(ctx, "sh", "-c", "echo ok"), nil
+		}},
+		maxAttempts: 3,
+	}
+
+	loop.processMessage(context.Background(), config.Config{Downloader: config.DownloaderConfig{TaskTimeoutMinutes: 1}}, queue.ReceivedMessage{
+		LeaseID: "lease-log",
+		Body:    queue.Message{TaskID: "t-log"},
+	})
+
+	messages := capture.Messages()
+	for _, want := range []string{
+		"downloader message pulled",
+		"downloader tdl execution started",
+		"downloader tdl execution finished",
+		"downloader task state updated",
+		"downloader queue action",
+	} {
+		if !containsMessage(messages, want) {
+			t.Fatalf("expected log %q, got %v", want, messages)
+		}
+	}
+}
+
+func TestQueuePullLoopLogsInvalidMessageAck(t *testing.T) {
+	q := &fakeQueue{}
+	capture := newLogCapture()
+	loop := queuePullLoop{
+		logger: capture.Logger(),
+		queue:  q,
+		tasks:  &fakeTasks{},
+		runner: fakeRunnerImpl{build: func(context.Context, dl.DownloadRequest) (*exec.Cmd, error) {
+			return nil, errors.New("not used")
+		}},
+		maxAttempts: 3,
+	}
+
+	loop.processMessage(context.Background(), config.Config{}, queue.ReceivedMessage{
+		LeaseID: "lease-invalid",
+		Body:    queue.Message{},
+	})
+
+	if len(q.acked) != 1 || q.acked[0] != "lease-invalid" {
+		t.Fatalf("expected invalid lease to be acked, got %+v", q.acked)
+	}
+	if !containsMessage(capture.Messages(), "downloader invalid message acked") {
+		t.Fatalf("expected invalid-message log, got %v", capture.Messages())
+	}
+}
+
+type logCapture struct {
+	handler *logCaptureHandler
+}
+
+func newLogCapture() *logCapture {
+	return &logCapture{handler: &logCaptureHandler{}}
+}
+
+func (c *logCapture) Logger() *slog.Logger {
+	return slog.New(c.handler)
+}
+
+func (c *logCapture) Messages() []string {
+	c.handler.mu.Lock()
+	defer c.handler.mu.Unlock()
+
+	out := make([]string, 0, len(c.handler.records))
+	for _, record := range c.handler.records {
+		out = append(out, record.Message)
+	}
+	return out
+}
+
+type logCaptureHandler struct {
+	mu      sync.Mutex
+	records []slog.Record
+}
+
+func (h *logCaptureHandler) Enabled(context.Context, slog.Level) bool { return true }
+func (h *logCaptureHandler) Handle(_ context.Context, r slog.Record) error {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.records = append(h.records, r.Clone())
+	return nil
+}
+func (h *logCaptureHandler) WithAttrs([]slog.Attr) slog.Handler { return h }
+func (h *logCaptureHandler) WithGroup(string) slog.Handler      { return h }
+
+func containsMessage(messages []string, want string) bool {
+	for _, msg := range messages {
+		if msg == want {
+			return true
+		}
+	}
+	return false
 }

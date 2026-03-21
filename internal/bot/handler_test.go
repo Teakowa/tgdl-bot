@@ -3,7 +3,9 @@ package bot
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -311,4 +313,114 @@ func TestHandleTextWithOutcomeReturnsReactionEmoji(t *testing.T) {
 	if outcome.ReactionEmoji != "🔥" {
 		t.Fatalf("unexpected reaction emoji: %q", outcome.ReactionEmoji)
 	}
+}
+
+func TestHandlerCreateTaskEmitsLifecycleLogs(t *testing.T) {
+	q := &fakeQueue{}
+	tasks := &fakeTaskQuery{}
+	tasks.createFn = func(req service.CreateQueuedTaskRequest) (service.Task, error) {
+		return service.Task{
+			TaskID:         req.TaskID,
+			ChatID:         req.ChatID,
+			UserID:         req.UserID,
+			TargetChatID:   req.TargetChatID,
+			URL:            req.URL,
+			IdempotencyKey: req.IdempotencyKey,
+			Status:         service.StatusQueued,
+			CreatedAt:      time.Now().UTC(),
+		}, nil
+	}
+
+	logs := newLogRecorder()
+	h := Handler{
+		Tasks:  tasks,
+		Queue:  q,
+		Logger: logs.Logger(),
+	}
+
+	_, err := h.HandleText(context.Background(), 1, 1, "https://t.me/c/1/2")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	messages := logs.Messages()
+	for _, want := range []string{
+		"bot task request parsed",
+		"bot task created",
+		"bot queue enqueue succeeded",
+	} {
+		if !containsLogMessage(messages, want) {
+			t.Fatalf("expected log %q, got %v", want, messages)
+		}
+	}
+}
+
+func TestHandlerDuplicateTaskEmitsExistingHitLog(t *testing.T) {
+	logs := newLogRecorder()
+	h := Handler{
+		Tasks: &fakeTaskQuery{task: service.Task{
+			TaskID: "existing-task",
+			Status: service.StatusRunning,
+		}},
+		Queue:  &fakeQueue{},
+		Logger: logs.Logger(),
+	}
+
+	_, err := h.HandleText(context.Background(), 1, 1, "https://t.me/c/1/2")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if !containsLogMessage(logs.Messages(), "bot task existing hit") {
+		t.Fatalf("expected existing-hit log, got %v", logs.Messages())
+	}
+}
+
+type logRecorder struct {
+	handler *captureHandler
+}
+
+func newLogRecorder() *logRecorder {
+	return &logRecorder{handler: &captureHandler{}}
+}
+
+func (r *logRecorder) Logger() *slog.Logger {
+	return slog.New(r.handler)
+}
+
+func (r *logRecorder) Messages() []string {
+	r.handler.mu.Lock()
+	defer r.handler.mu.Unlock()
+
+	out := make([]string, 0, len(r.handler.records))
+	for _, record := range r.handler.records {
+		out = append(out, record.Message)
+	}
+	return out
+}
+
+type captureHandler struct {
+	mu      sync.Mutex
+	records []slog.Record
+}
+
+func (h *captureHandler) Enabled(context.Context, slog.Level) bool { return true }
+
+func (h *captureHandler) Handle(_ context.Context, r slog.Record) error {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.records = append(h.records, r.Clone())
+	return nil
+}
+
+func (h *captureHandler) WithAttrs([]slog.Attr) slog.Handler { return h }
+func (h *captureHandler) WithGroup(string) slog.Handler      { return h }
+
+func containsLogMessage(messages []string, want string) bool {
+	for _, msg := range messages {
+		if msg == want {
+			return true
+		}
+	}
+	return false
 }

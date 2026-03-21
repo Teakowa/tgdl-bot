@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
+	neturl "net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -184,14 +185,26 @@ func run(ctx context.Context, cfg config.Config, logger *slog.Logger, preflight 
 func (l queuePullLoop) processMessage(ctx context.Context, cfg config.Config, message queue.ReceivedMessage) {
 	if message.LeaseID == "" || message.Body.TaskID == "" {
 		if message.LeaseID != "" {
+			l.logger.Warn("downloader invalid message acked",
+				"lease_id", message.LeaseID,
+				"has_task_id", message.Body.TaskID != "",
+			)
 			_ = l.queue.Ack(ctx, []string{message.LeaseID})
 		}
 		return
 	}
+	l.logger.Info("downloader message pulled",
+		"task_id", message.Body.TaskID,
+		"lease_id", message.LeaseID,
+	)
 
 	task, err := l.tasks.GetTask(ctx, message.Body.TaskID)
 	if err != nil {
 		if errors.Is(err, service.ErrTaskNotFound) {
+			l.logger.Warn("downloader task missing, ack lease",
+				"task_id", message.Body.TaskID,
+				"lease_id", message.LeaseID,
+			)
 			_ = l.queue.Ack(ctx, []string{message.LeaseID})
 			return
 		}
@@ -207,6 +220,7 @@ func (l queuePullLoop) processMessage(ctx context.Context, cfg config.Config, me
 
 	startedAt := time.Now().UTC()
 	leaseID := message.LeaseID
+	statusFrom := task.Status
 	if err := l.tasks.UpdateTask(ctx, task.TaskID, service.TaskUpdate{
 		Status:    service.StatusRunning,
 		LeaseID:   &leaseID,
@@ -216,8 +230,14 @@ func (l queuePullLoop) processMessage(ctx context.Context, cfg config.Config, me
 		_ = l.queue.Retry(ctx, []string{message.LeaseID})
 		return
 	}
+	l.logger.Info("downloader task state updated",
+		"task_id", task.TaskID,
+		"lease_id", message.LeaseID,
+		"status_from", statusFrom,
+		"status_to", service.StatusRunning,
+	)
 
-	result, runErr := l.executeTask(ctx, cfg, task)
+	result, errorClass, runErr := l.executeTask(ctx, cfg, task)
 	if runErr == nil {
 		finishedAt := time.Now().UTC()
 		out := strings.TrimSpace(strings.TrimSpace(result.Stdout + "\n" + result.Stderr))
@@ -230,6 +250,18 @@ func (l queuePullLoop) processMessage(ctx context.Context, cfg config.Config, me
 			_ = l.queue.Retry(ctx, []string{message.LeaseID})
 			return
 		}
+		l.logger.Info("downloader task state updated",
+			"task_id", task.TaskID,
+			"lease_id", message.LeaseID,
+			"status_from", service.StatusRunning,
+			"status_to", service.StatusDone,
+			"duration_ms", result.Duration.Milliseconds(),
+		)
+		l.logger.Info("downloader queue action",
+			"task_id", task.TaskID,
+			"lease_id", message.LeaseID,
+			"action", "ack",
+		)
 		_ = l.queue.Ack(ctx, []string{message.LeaseID})
 		return
 	}
@@ -239,11 +271,11 @@ func (l queuePullLoop) processMessage(ctx context.Context, cfg config.Config, me
 	errorMessage := runErr.Error()
 	status := service.StatusFailed
 	shouldRetry := false
-	if dl.IsRetryableError(runErr) && retryCount < l.maxAttempts {
+	if errorClass == dl.ErrorClassRetryable && retryCount < l.maxAttempts {
 		status = service.StatusRetrying
 		shouldRetry = true
 	}
-	if dl.IsRetryableError(runErr) && retryCount >= l.maxAttempts {
+	if errorClass == dl.ErrorClassRetryable && retryCount >= l.maxAttempts {
 		status = service.StatusDeadLettered
 	}
 
@@ -262,15 +294,36 @@ func (l queuePullLoop) processMessage(ctx context.Context, cfg config.Config, me
 		_ = l.queue.Retry(ctx, []string{message.LeaseID})
 		return
 	}
+	l.logger.Info("downloader task state updated",
+		"task_id", task.TaskID,
+		"lease_id", message.LeaseID,
+		"status_from", service.StatusRunning,
+		"status_to", status,
+		"retry_count", retryCount,
+		"exit_code", result.ExitCode,
+		"error_class", errorClass,
+	)
 
 	if shouldRetry {
+		l.logger.Info("downloader queue action",
+			"task_id", task.TaskID,
+			"lease_id", message.LeaseID,
+			"action", "retry",
+			"error_class", errorClass,
+		)
 		_ = l.queue.Retry(ctx, []string{message.LeaseID})
 		return
 	}
+	l.logger.Info("downloader queue action",
+		"task_id", task.TaskID,
+		"lease_id", message.LeaseID,
+		"action", "ack",
+		"error_class", errorClass,
+	)
 	_ = l.queue.Ack(ctx, []string{message.LeaseID})
 }
 
-func (l queuePullLoop) executeTask(ctx context.Context, cfg config.Config, task service.Task) (dl.RunResult, error) {
+func (l queuePullLoop) executeTask(ctx context.Context, cfg config.Config, task service.Task) (dl.RunResult, dl.ErrorClass, error) {
 	timeout := time.Duration(cfg.Downloader.TaskTimeoutMinutes) * time.Minute
 	if timeout <= 0 {
 		timeout = 60 * time.Minute
@@ -286,8 +339,12 @@ func (l queuePullLoop) executeTask(ctx context.Context, cfg config.Config, task 
 		Storage:      cfg.Downloader.Storage,
 	})
 	if err != nil {
-		return dl.RunResult{}, errors.Join(dl.ErrNonRetryable, err)
+		return dl.RunResult{}, dl.ErrorClassNonRetryable, errors.Join(dl.ErrNonRetryable, err)
 	}
+	l.logger.Info("downloader tdl execution started",
+		"task_id", task.TaskID,
+		"command", sanitizeCommand(resultCommand(cmd)),
+	)
 
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
@@ -302,17 +359,30 @@ func (l queuePullLoop) executeTask(ctx context.Context, cfg config.Config, task 
 		Duration: time.Since(started),
 	}
 	if runErr == nil {
-		return result, nil
+		l.logger.Info("downloader tdl execution finished",
+			"task_id", task.TaskID,
+			"duration_ms", result.Duration.Milliseconds(),
+			"exit_code", 0,
+			"error_class", "none",
+		)
+		return result, dl.ErrorClassUnknown, nil
 	}
 
 	result.ExitCode = exitCodeFrom(runErr)
-	if classifyTDLError(runCtx, result, runErr) == dl.ErrorClassRetryable {
+	errorClass := classifyTDLError(runCtx, result, runErr)
+	l.logger.Info("downloader tdl execution finished",
+		"task_id", task.TaskID,
+		"duration_ms", result.Duration.Milliseconds(),
+		"exit_code", result.ExitCode,
+		"error_class", errorClass,
+	)
+	if errorClass == dl.ErrorClassRetryable {
 		if runCtx.Err() != nil {
-			return result, errors.Join(dl.ErrRetryable, runErr, runCtx.Err())
+			return result, errorClass, errors.Join(dl.ErrRetryable, runErr, runCtx.Err())
 		}
-		return result, errors.Join(dl.ErrRetryable, runErr)
+		return result, errorClass, errors.Join(dl.ErrRetryable, runErr)
 	}
-	return result, errors.Join(dl.ErrNonRetryable, runErr)
+	return result, errorClass, errors.Join(dl.ErrNonRetryable, runErr)
 }
 
 func exitCodeFrom(err error) int {
@@ -362,6 +432,45 @@ var transientErrorKeywords = []string{
 	"transport is closing",
 	"tls handshake timeout",
 	"eof",
+}
+
+func resultCommand(cmd *exec.Cmd) []string {
+	return append([]string{cmd.Path}, cmd.Args[1:]...)
+}
+
+func sanitizeCommand(command []string) []string {
+	if len(command) == 0 {
+		return nil
+	}
+
+	safe := append([]string(nil), command...)
+	for i := range safe {
+		if i > 0 && (safe[i-1] == "-u" || safe[i-1] == "--from") {
+			safe[i] = redactURL(safe[i])
+			continue
+		}
+		if i > 0 && safe[i-1] == "--storage" {
+			safe[i] = "[redacted]"
+			continue
+		}
+		if strings.HasPrefix(safe[i], "--storage=") {
+			safe[i] = "--storage=[redacted]"
+		}
+	}
+	return safe
+}
+
+func redactURL(raw string) string {
+	u, err := neturl.Parse(strings.TrimSpace(raw))
+	if err != nil {
+		return raw
+	}
+
+	path := u.Path
+	if len(path) > 18 {
+		path = path[:18] + "..."
+	}
+	return fmt.Sprintf("%s://%s%s", u.Scheme, u.Host, path)
 }
 
 func openSQLite(path string) (*sql.DB, error) {

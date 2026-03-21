@@ -5,6 +5,8 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
+	"log/slog"
+	neturl "net/url"
 	"strings"
 	"time"
 
@@ -45,6 +47,7 @@ type Handler struct {
 	AllowedUserIDs []int64
 	Tasks          service.TaskService
 	Queue          queue.Producer
+	Logger         *slog.Logger
 }
 
 func (h Handler) HandleText(ctx context.Context, userID, chatID int64, text string) (string, error) {
@@ -104,6 +107,13 @@ func (h Handler) HandleTextWithOutcome(ctx context.Context, userID, chatID int64
 
 		newTaskIDValue := newTaskID()
 		idempotencyKey := service.NewIdempotencyKey(userID, url)
+		h.logInfo("bot task request parsed",
+			"chat_id", chatID,
+			"user_id", userID,
+			"url", redactURL(url),
+			"idempotency_key_prefix", idempotencyKeyPrefix(idempotencyKey),
+		)
+
 		req := service.CreateQueuedTaskRequest{
 			TaskID:         newTaskIDValue,
 			ChatID:         chatID,
@@ -114,11 +124,28 @@ func (h Handler) HandleTextWithOutcome(ctx context.Context, userID, chatID int64
 		}
 		task, err := h.Tasks.CreateQueuedTask(ctx, req)
 		if err != nil {
+			h.logError("bot task create failed",
+				"chat_id", chatID,
+				"user_id", userID,
+				"url", redactURL(url),
+				"error", err,
+			)
 			return HandleTextOutcome{Reply: "任务创建失败，请稍后重试。"}, nil
 		}
 		if task.TaskID != newTaskIDValue {
+			h.logInfo("bot task existing hit",
+				"task_id", task.TaskID,
+				"status", task.Status,
+				"rebuild", isRebuildableStatus(task.Status),
+				"idempotency_key_prefix", idempotencyKeyPrefix(idempotencyKey),
+			)
 			if isRebuildableStatus(task.Status) {
 				if _, err := h.Tasks.DeleteFailedByIdempotencyKey(ctx, idempotencyKey); err != nil {
+					h.logError("bot task rebuild cleanup failed",
+						"task_id", task.TaskID,
+						"status", task.Status,
+						"error", err,
+					)
 					return HandleTextOutcome{Reply: fmt.Sprintf("任务重建失败\nTask ID: %s", task.TaskID), ReactionEmoji: statusReaction(task.Status)}, nil
 				}
 
@@ -126,14 +153,27 @@ func (h Handler) HandleTextWithOutcome(ctx context.Context, userID, chatID int64
 				req.TaskID = rebuildTaskID
 				task, err = h.Tasks.CreateQueuedTask(ctx, req)
 				if err != nil {
+					h.logError("bot task rebuild create failed",
+						"task_id", rebuildTaskID,
+						"error", err,
+					)
 					return HandleTextOutcome{Reply: "任务重建失败，请稍后重试。", ReactionEmoji: statusReaction(service.StatusFailed)}, nil
 				}
 				if task.TaskID != rebuildTaskID {
+					h.logInfo("bot task rebuild dedup hit",
+						"task_id", task.TaskID,
+						"status", task.Status,
+					)
 					return HandleTextOutcome{
 						Reply:         fmt.Sprintf("任务已存在\nTask ID: %s\n状态: %s", task.TaskID, task.Status),
 						ReactionEmoji: statusReaction(task.Status),
 					}, nil
 				}
+				h.logInfo("bot task rebuilt",
+					"task_id", task.TaskID,
+					"status", task.Status,
+					"idempotency_key_prefix", idempotencyKeyPrefix(task.IdempotencyKey),
+				)
 				if err := h.enqueueTask(ctx, task); err != nil {
 					return HandleTextOutcome{Reply: fmt.Sprintf("任务重建后入队失败\nTask ID: %s", task.TaskID), ReactionEmoji: statusReaction(service.StatusFailed)}, nil
 				}
@@ -147,6 +187,12 @@ func (h Handler) HandleTextWithOutcome(ctx context.Context, userID, chatID int64
 				ReactionEmoji: statusReaction(task.Status),
 			}, nil
 		}
+		h.logInfo("bot task created",
+			"task_id", task.TaskID,
+			"status", task.Status,
+			"idempotency_key_prefix", idempotencyKeyPrefix(task.IdempotencyKey),
+			"url", redactURL(task.URL),
+		)
 
 		if err := h.enqueueTask(ctx, task); err != nil {
 			return HandleTextOutcome{Reply: fmt.Sprintf("任务入队失败\nTask ID: %s", task.TaskID), ReactionEmoji: statusReaction(service.StatusFailed)}, nil
@@ -168,6 +214,11 @@ func (h Handler) enqueueTask(ctx context.Context, task service.Task) error {
 		CreatedAt:    task.CreatedAt,
 		Idempotency:  task.IdempotencyKey,
 	}); err != nil {
+		h.logError("bot queue enqueue failed",
+			"task_id", task.TaskID,
+			"status_to", service.StatusFailed,
+			"error", err,
+		)
 		msg := err.Error()
 		_ = h.Tasks.UpdateTask(ctx, task.TaskID, service.TaskUpdate{
 			Status:       service.StatusFailed,
@@ -175,7 +226,46 @@ func (h Handler) enqueueTask(ctx context.Context, task service.Task) error {
 		})
 		return err
 	}
+	h.logInfo("bot queue enqueue succeeded",
+		"task_id", task.TaskID,
+		"status_to", service.StatusQueued,
+	)
 	return nil
+}
+
+func (h Handler) logInfo(msg string, args ...any) {
+	if h.Logger == nil {
+		return
+	}
+	h.Logger.Info(msg, args...)
+}
+
+func (h Handler) logError(msg string, args ...any) {
+	if h.Logger == nil {
+		return
+	}
+	h.Logger.Error(msg, args...)
+}
+
+func idempotencyKeyPrefix(key string) string {
+	key = strings.TrimSpace(key)
+	if len(key) <= 8 {
+		return key
+	}
+	return key[:8]
+}
+
+func redactURL(raw string) string {
+	u, err := neturl.Parse(strings.TrimSpace(raw))
+	if err != nil {
+		return raw
+	}
+
+	path := u.Path
+	if len(path) > 18 {
+		path = path[:18] + "..."
+	}
+	return fmt.Sprintf("%s://%s%s", u.Scheme, u.Host, path)
 }
 
 func isRebuildableStatus(status service.Status) bool {

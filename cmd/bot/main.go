@@ -57,6 +57,7 @@ func run(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 		AllowedUserIDs: cfg.Telegram.AllowedUserIDs,
 		Tasks:          taskService,
 		Queue:          queueClient,
+		Logger:         logger,
 	}
 
 	logger.Info("bot entrypoint initialized",
