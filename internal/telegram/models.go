@@ -2,7 +2,6 @@ package telegram
 
 import (
 	"context"
-	"time"
 )
 
 type Client interface {
@@ -37,11 +36,11 @@ type Update struct {
 }
 
 type Message struct {
-	MessageID int64     `json:"message_id"`
-	Date      time.Time `json:"date"`
-	Chat      Chat      `json:"chat"`
-	From      *User     `json:"from,omitempty"`
-	Text      string    `json:"text,omitempty"`
+	MessageID int64  `json:"message_id"`
+	Date      int64  `json:"date"`
+	Chat      Chat   `json:"chat"`
+	From      *User  `json:"from,omitempty"`
+	Text      string `json:"text,omitempty"`
 }
 
 type Chat struct {
