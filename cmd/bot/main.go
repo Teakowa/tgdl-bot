@@ -6,9 +6,12 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"time"
 
+	"tgdl-bot/internal/bot"
 	"tgdl-bot/internal/config"
 	"tgdl-bot/internal/logging"
+	"tgdl-bot/internal/telegram"
 )
 
 func main() {
@@ -30,17 +33,25 @@ func run(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 		return errors.New("logger is required")
 	}
 
+	handler := bot.Handler{
+		AllowedUserIDs: cfg.Telegram.AllowedUserIDs,
+	}
+
 	logger.Info("bot entrypoint initialized",
 		"env", cfg.Environment,
 		"telegram_api_base", cfg.Telegram.APIBase,
 		"webhook_enabled", cfg.Telegram.UseWebhook,
+		"commands", []string{"/start", "/help", "/status", "/last"},
+		"allowlist_size", len(handler.AllowedUserIDs),
 	)
-
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	default:
+	client := telegram.NewHTTPClient(cfg.Telegram.APIBase, cfg.Telegram.BotToken, 35*time.Second)
+	runtime := bot.Runtime{
+		Client:         client,
+		Handler:        handler,
+		Logger:         logger,
+		PollInterval:   1200 * time.Millisecond,
+		PollLimit:      50,
+		TimeoutSeconds: 30,
 	}
-
-	return nil
+	return runtime.Run(ctx)
 }

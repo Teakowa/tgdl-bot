@@ -8,6 +8,7 @@ import (
 	"os"
 
 	"tgdl-bot/internal/config"
+	dl "tgdl-bot/internal/downloader"
 	"tgdl-bot/internal/logging"
 )
 
@@ -19,27 +20,30 @@ type pullLoop interface {
 	Run(context.Context, config.Config) error
 }
 
-type noopPreflightHook struct {
+type startupPreflightHook struct {
 	logger *slog.Logger
+	runner dl.Runner
 }
 
-func (h noopPreflightHook) Check(ctx context.Context, cfg config.Config) error {
+func (h startupPreflightHook) Check(ctx context.Context, cfg config.Config) error {
 	if h.logger == nil {
 		return errors.New("logger is required")
 	}
 
-	h.logger.Info("downloader preflight hook executed",
+	h.logger.Info("running downloader preflight",
 		"env", cfg.Environment,
 		"login_required", cfg.Downloader.LoginRequired,
 		"login_check_on_start", cfg.Downloader.LoginCheckOnStart,
 	)
 
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	default:
-		return nil
-	}
+	checker := dl.StartupPreflight{Runner: h.runner}
+	return checker.Check(ctx, dl.StartupConfig{
+		Binary:        cfg.Downloader.Bin,
+		DownloadDir:   cfg.Downloader.DownloadDir,
+		Namespace:     cfg.Downloader.Namespace,
+		Storage:       cfg.Downloader.Storage,
+		LoginRequired: cfg.Downloader.LoginRequired && cfg.Downloader.LoginCheckOnStart,
+	})
 }
 
 type noopPullLoop struct {
@@ -68,7 +72,7 @@ func main() {
 	}
 
 	logger := logging.New(cfg.LogLevel)
-	if err := run(context.Background(), cfg, logger, noopPreflightHook{logger: logger}, noopPullLoop{logger: logger}); err != nil {
+	if err := run(context.Background(), cfg, logger, startupPreflightHook{logger: logger, runner: dl.DefaultRunner{}}, noopPullLoop{logger: logger}); err != nil {
 		logger.Error("downloader exited", "error", err)
 		os.Exit(1)
 	}
