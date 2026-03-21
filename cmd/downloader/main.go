@@ -143,7 +143,7 @@ func main() {
 
 	taskService := service.NewTaskService(store.TaskRepository())
 	queueClient := queue.NewCloudflareClient(cfg.Cloudflare.AccountID, cfg.Cloudflare.QueueID, cfg.Cloudflare.APIToken, 20*time.Second)
-	runner := dl.DefaultRunner{}
+	runner := dl.DefaultRunner{PreflightChecker: dl.NewTDLPreflightChecker()}
 
 	if err := run(context.Background(), cfg, logger, startupPreflightHook{logger: logger, runner: runner}, queuePullLoop{
 		logger:      logger,
@@ -330,6 +330,10 @@ func openSQLite(path string) (*sql.DB, error) {
 	db, err := sql.Open("sqlite", path)
 	if err != nil {
 		return nil, fmt.Errorf("open sqlite: %w", err)
+	}
+	if _, err := db.Exec("PRAGMA busy_timeout = 5000"); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("set sqlite busy_timeout: %w", err)
 	}
 	if err := db.Ping(); err != nil {
 		db.Close()

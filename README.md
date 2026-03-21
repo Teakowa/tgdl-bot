@@ -83,7 +83,7 @@ docker compose -f deploy/docker-compose.yml up -d
 Run this once before expecting downloader consumption to succeed:
 
 ```bash
-docker compose -f deploy/docker-compose.yml run --rm downloader tdl login -T qr -n default
+docker compose -f deploy/docker-compose.yml run --rm --entrypoint tdl downloader login -T qr -n default
 ```
 
 This login state is persisted in Docker volumes (`tgdl-data` and `tgdl-tdl-session`).
