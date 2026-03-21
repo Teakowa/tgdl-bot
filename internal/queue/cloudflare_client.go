@@ -3,6 +3,7 @@ package queue
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -81,9 +82,13 @@ func (c *CloudflareClient) Pull(ctx context.Context, batchSize, visibilityTimeou
 
 	received := make([]ReceivedMessage, 0, len(out.Result.Messages))
 	for _, msg := range out.Result.Messages {
-		var body Message
-		if err := json.Unmarshal(msg.Body, &body); err != nil {
-			return nil, fmt.Errorf("queue: decode pulled message body: %w", err)
+		body, err := decodeMessageBody(msg.Body)
+		if err != nil {
+			received = append(received, ReceivedMessage{
+				LeaseID: msg.LeaseID,
+				RawBody: append([]byte(nil), msg.Body...),
+			})
+			continue
 		}
 		received = append(received, ReceivedMessage{
 			LeaseID: msg.LeaseID,
@@ -94,28 +99,83 @@ func (c *CloudflareClient) Pull(ctx context.Context, batchSize, visibilityTimeou
 	return received, nil
 }
 
+func decodeMessageBody(raw json.RawMessage) (Message, error) {
+	var body Message
+	if err := json.Unmarshal(raw, &body); err == nil {
+		return body, nil
+	}
+
+	var asString string
+	if err := json.Unmarshal(raw, &asString); err != nil {
+		return Message{}, err
+	}
+	if err := json.Unmarshal([]byte(asString), &body); err != nil {
+		decoded, decodeErr := decodeBase64String(asString)
+		if decodeErr != nil {
+			return Message{}, err
+		}
+		if err := json.Unmarshal(decoded, &body); err != nil {
+			return Message{}, err
+		}
+	}
+	return body, nil
+}
+
+func decodeBase64String(input string) ([]byte, error) {
+	if b, err := base64.StdEncoding.DecodeString(input); err == nil {
+		return b, nil
+	}
+	if b, err := base64.RawStdEncoding.DecodeString(input); err == nil {
+		return b, nil
+	}
+	if b, err := base64.URLEncoding.DecodeString(input); err == nil {
+		return b, nil
+	}
+	return base64.RawURLEncoding.DecodeString(input)
+}
+
 func (c *CloudflareClient) Ack(ctx context.Context, leaseIDs []string) error {
 	if len(leaseIDs) == 0 {
 		return nil
 	}
-	return c.postJSON(ctx, "/messages/ack", map[string]any{"leases": leaseIDs}, nil)
+	acks := make([]map[string]string, 0, len(leaseIDs))
+	for _, leaseID := range leaseIDs {
+		acks = append(acks, map[string]string{"lease_id": leaseID})
+	}
+	return c.postJSON(ctx, "/messages/ack", map[string]any{"acks": acks}, nil)
 }
 
 func (c *CloudflareClient) Retry(ctx context.Context, leaseIDs []string) error {
 	if len(leaseIDs) == 0 {
 		return nil
 	}
-	return c.postJSON(ctx, "/messages/retry", map[string]any{"leases": leaseIDs}, nil)
+	retries := make([]map[string]string, 0, len(leaseIDs))
+	for _, leaseID := range leaseIDs {
+		retries = append(retries, map[string]string{"lease_id": leaseID})
+	}
+	return c.postJSON(ctx, "/messages/ack", map[string]any{"retries": retries}, nil)
 }
 
 func (c *CloudflareClient) AckAndRetry(ctx context.Context, ackLeaseIDs, retryLeaseIDs []string) error {
-	if err := c.Ack(ctx, ackLeaseIDs); err != nil {
-		return err
+	payload := map[string]any{}
+	if len(ackLeaseIDs) > 0 {
+		acks := make([]map[string]string, 0, len(ackLeaseIDs))
+		for _, leaseID := range ackLeaseIDs {
+			acks = append(acks, map[string]string{"lease_id": leaseID})
+		}
+		payload["acks"] = acks
 	}
-	if err := c.Retry(ctx, retryLeaseIDs); err != nil {
-		return err
+	if len(retryLeaseIDs) > 0 {
+		retries := make([]map[string]string, 0, len(retryLeaseIDs))
+		for _, leaseID := range retryLeaseIDs {
+			retries = append(retries, map[string]string{"lease_id": leaseID})
+		}
+		payload["retries"] = retries
 	}
-	return nil
+	if len(payload) == 0 {
+		return nil
+	}
+	return c.postJSON(ctx, "/messages/ack", payload, nil)
 }
 
 func (c *CloudflareClient) postJSON(ctx context.Context, path string, payload any, decodeTarget any) error {
