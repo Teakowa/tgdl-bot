@@ -97,6 +97,8 @@ func buildForwardCommand(ctx context.Context, req DownloadRequest) (*exec.Cmd, e
 
 var telegramURLPartsPattern = regexp.MustCompile(`^https?://(?:t\.me|telegram\.me)/(?:c/\d+/|[A-Za-z0-9_]+/)(\d+)$`)
 
+const defaultReconnectTimeout = "10m"
+
 func buildForwardArgs(req DownloadRequest) ([]string, error) {
 	if req.URL == "" {
 		return nil, errors.New("downloader: URL is required")
@@ -116,6 +118,7 @@ func buildForwardArgs(req DownloadRequest) ([]string, error) {
 		"-u", req.URL,
 		"--to", fmt.Sprintf("%d", req.TargetChatID),
 		"--message-id", messageID,
+		"--reconnect-timeout", defaultReconnectTimeout,
 	}
 
 	if req.Namespace != "" {

@@ -22,6 +22,7 @@ func TestBuildForwardArgs(t *testing.T) {
 		"-u", "https://t.me/c/123/456",
 		"--to", "999001",
 		"--message-id", "456",
+		"--reconnect-timeout", "10m",
 		"--namespace", "default",
 		"--storage", "/tmp/tdl-storage",
 	}

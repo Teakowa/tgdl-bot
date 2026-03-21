@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -304,11 +305,13 @@ func (l queuePullLoop) executeTask(ctx context.Context, cfg config.Config, task 
 		return result, nil
 	}
 
-	if errors.Is(runCtx.Err(), context.DeadlineExceeded) {
-		result.ExitCode = exitCodeFrom(runErr)
-		return result, errors.Join(dl.ErrRetryable, runErr, context.DeadlineExceeded)
-	}
 	result.ExitCode = exitCodeFrom(runErr)
+	if classifyTDLError(runCtx, result, runErr) == dl.ErrorClassRetryable {
+		if runCtx.Err() != nil {
+			return result, errors.Join(dl.ErrRetryable, runErr, runCtx.Err())
+		}
+		return result, errors.Join(dl.ErrRetryable, runErr)
+	}
 	return result, errors.Join(dl.ErrNonRetryable, runErr)
 }
 
@@ -318,6 +321,47 @@ func exitCodeFrom(err error) int {
 		return exitErr.ExitCode()
 	}
 	return 0
+}
+
+func classifyTDLError(runCtx context.Context, result dl.RunResult, runErr error) dl.ErrorClass {
+	if runErr == nil {
+		return dl.ErrorClassUnknown
+	}
+
+	if errors.Is(runCtx.Err(), context.DeadlineExceeded) || errors.Is(runCtx.Err(), context.Canceled) {
+		return dl.ErrorClassRetryable
+	}
+
+	var netErr net.Error
+	if errors.As(runErr, &netErr) && (netErr.Timeout() || netErr.Temporary()) {
+		return dl.ErrorClassRetryable
+	}
+
+	text := strings.ToLower(strings.Join([]string{
+		runErr.Error(),
+		result.Stderr,
+		result.Stdout,
+	}, "\n"))
+	for _, kw := range transientErrorKeywords {
+		if strings.Contains(text, kw) {
+			return dl.ErrorClassRetryable
+		}
+	}
+
+	return dl.ErrorClassNonRetryable
+}
+
+var transientErrorKeywords = []string{
+	"timeout",
+	"i/o timeout",
+	"connection reset",
+	"connection aborted",
+	"connection refused",
+	"broken pipe",
+	"network is unreachable",
+	"transport is closing",
+	"tls handshake timeout",
+	"eof",
 }
 
 func openSQLite(path string) (*sql.DB, error) {
