@@ -2,16 +2,23 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"time"
 
 	"tgdl-bot/internal/bot"
 	"tgdl-bot/internal/config"
 	"tgdl-bot/internal/logging"
+	"tgdl-bot/internal/queue"
+	"tgdl-bot/internal/service"
+	"tgdl-bot/internal/storage"
 	"tgdl-bot/internal/telegram"
+
+	_ "modernc.org/sqlite"
 )
 
 func main() {
@@ -33,8 +40,23 @@ func run(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 		return errors.New("logger is required")
 	}
 
+	db, err := openSQLite(cfg.Storage.SQLitePath)
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+
+	store := storage.NewSQLiteStore(db)
+	if err := store.ApplyMigrations(ctx, storage.DefaultMigrations()...); err != nil {
+		return fmt.Errorf("apply sqlite migrations: %w", err)
+	}
+	taskService := service.NewTaskService(store.TaskRepository())
+	queueClient := queue.NewCloudflareClient(cfg.Cloudflare.AccountID, cfg.Cloudflare.QueueID, cfg.Cloudflare.APIToken, 20*time.Second)
+
 	handler := bot.Handler{
 		AllowedUserIDs: cfg.Telegram.AllowedUserIDs,
+		Tasks:          taskService,
+		Queue:          queueClient,
 	}
 
 	logger.Info("bot entrypoint initialized",
@@ -54,4 +76,22 @@ func run(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 		TimeoutSeconds: 30,
 	}
 	return runtime.Run(ctx)
+}
+
+func openSQLite(path string) (*sql.DB, error) {
+	if path == "" {
+		return nil, errors.New("empty sqlite path")
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return nil, fmt.Errorf("create sqlite dir: %w", err)
+	}
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		return nil, fmt.Errorf("open sqlite: %w", err)
+	}
+	if err := db.Ping(); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("ping sqlite: %w", err)
+	}
+	return db, nil
 }

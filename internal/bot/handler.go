@@ -2,9 +2,13 @@ package bot
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
 	"strings"
+	"time"
 
+	"tgdl-bot/internal/queue"
 	"tgdl-bot/internal/service"
 )
 
@@ -39,7 +43,8 @@ type TaskQueryService interface {
 
 type Handler struct {
 	AllowedUserIDs []int64
-	Tasks          TaskQueryService
+	Tasks          service.TaskService
+	Queue          queue.Producer
 }
 
 func (h Handler) HandleText(ctx context.Context, userID, chatID int64, text string) (string, error) {
@@ -77,7 +82,44 @@ func (h Handler) HandleText(ctx context.Context, userID, chatID int64, text stri
 		if !ok {
 			return "", nil
 		}
-		return fmt.Sprintf("转发任务已加入队列\nURL: %s", url), nil
+		if h.Tasks == nil || h.Queue == nil {
+			return "任务创建暂未启用。", nil
+		}
+
+		newTaskIDValue := newTaskID()
+		idempotencyKey := service.NewIdempotencyKey(userID, url)
+		task, err := h.Tasks.CreateQueuedTask(ctx, service.CreateQueuedTaskRequest{
+			TaskID:         newTaskIDValue,
+			ChatID:         chatID,
+			UserID:         userID,
+			TargetChatID:   chatID,
+			URL:            url,
+			IdempotencyKey: idempotencyKey,
+		})
+		if err != nil {
+			return "任务创建失败，请稍后重试。", nil
+		}
+		if task.TaskID != newTaskIDValue {
+			return fmt.Sprintf("任务已存在\nTask ID: %s\n状态: %s", task.TaskID, task.Status), nil
+		}
+
+		if err := h.Queue.Enqueue(ctx, queue.Message{
+			TaskID:       task.TaskID,
+			ChatID:       task.ChatID,
+			UserID:       task.UserID,
+			TargetChatID: task.TargetChatID,
+			URL:          task.URL,
+			CreatedAt:    task.CreatedAt,
+			Idempotency:  task.IdempotencyKey,
+		}); err != nil {
+			msg := err.Error()
+			_ = h.Tasks.UpdateTask(ctx, task.TaskID, service.TaskUpdate{
+				Status:       service.StatusFailed,
+				ErrorMessage: &msg,
+			})
+			return fmt.Sprintf("任务入队失败\nTask ID: %s", task.TaskID), nil
+		}
+		return fmt.Sprintf("转发任务已加入队列\nTask ID: %s\nURL: %s", task.TaskID, task.URL), nil
 	}
 }
 
@@ -108,4 +150,12 @@ func formatLast(tasks []service.Task) string {
 		lines = append(lines, fmt.Sprintf("- %s | %s | %s", task.TaskID, task.Status, task.URL))
 	}
 	return strings.Join(lines, "\n")
+}
+
+func newTaskID() string {
+	var b [16]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		return fmt.Sprintf("task-%d", time.Now().UnixNano())
+	}
+	return hex.EncodeToString(b[:])
 }

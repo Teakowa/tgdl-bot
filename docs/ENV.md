@@ -38,9 +38,9 @@ All configuration is read from environment variables.
 - `LOG_LEVEL`: optional log level
 - `ENV`: optional runtime environment name
 
-## Phase 2 defaults
+## Phase 1 defaults
 
-The phase 2 scaffold assumes:
+The phase 1 scaffold assumes:
 
 - long polling for the bot unless webhook mode is explicitly enabled
 - a single local SQLite database

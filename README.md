@@ -1,6 +1,6 @@
 # TGDL Bot
 
-Go-based Telegram message forwarding bot and downloader scaffold for the phase 2 spec.
+Go-based Telegram message forwarding bot and downloader scaffold for the phase 1 spec.
 
 ## What this repo contains
 
@@ -11,7 +11,7 @@ Go-based Telegram message forwarding bot and downloader scaffold for the phase 2
 
 ## Prerequisites
 
-- Go 1.23+
+- Go 1.24+
 - `tdl` installed and available on `PATH`
 - Telegram bot token
 - Cloudflare Queue credentials

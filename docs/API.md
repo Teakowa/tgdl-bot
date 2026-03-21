@@ -1,6 +1,6 @@
 # API
 
-Phase 2 forwarding scope only.
+Phase 1 forwarding scope only.
 
 ## External APIs
 
@@ -62,7 +62,7 @@ Used by the downloader service to perform message forward work.
 - `retrying`
 - `dead_lettered`
 
-## Phase 2 behavior summary
+## Phase 1 behavior summary
 
 - Bot accepts Telegram URLs only.
 - Bot persists a queued forward task before enqueueing to Cloudflare Queue.

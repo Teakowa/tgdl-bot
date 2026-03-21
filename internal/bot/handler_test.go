@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"tgdl-bot/internal/queue"
 	"tgdl-bot/internal/service"
 )
 
@@ -14,6 +15,32 @@ type fakeTaskQuery struct {
 	task  service.Task
 	tasks []service.Task
 	err   error
+}
+
+type fakeQueue struct {
+	messages []queue.Message
+	err      error
+}
+
+func (f *fakeQueue) Enqueue(context.Context, queue.Message) error {
+	if f.err != nil {
+		return f.err
+	}
+	return nil
+}
+
+func (f *fakeQueue) EnqueueBatch(context.Context, []queue.Message) error {
+	return f.err
+}
+
+func (f fakeTaskQuery) CreateQueuedTask(context.Context, service.CreateQueuedTaskRequest) (service.Task, error) {
+	if f.err != nil {
+		return service.Task{}, f.err
+	}
+	if f.task.TaskID == "" {
+		return service.Task{TaskID: "task-created", Status: service.StatusQueued}, nil
+	}
+	return f.task, nil
 }
 
 func (f fakeTaskQuery) GetTask(context.Context, string) (service.Task, error) {
@@ -28,6 +55,17 @@ func (f fakeTaskQuery) ListRecentTasks(context.Context, int64, int) ([]service.T
 		return nil, f.err
 	}
 	return f.tasks, nil
+}
+
+func (f fakeTaskQuery) FindByIdempotencyKey(context.Context, string) (service.Task, error) {
+	if f.err != nil {
+		return service.Task{}, f.err
+	}
+	return f.task, nil
+}
+
+func (f fakeTaskQuery) UpdateTask(context.Context, string, service.TaskUpdate) error {
+	return f.err
 }
 
 func TestHandlerStatusCommand(t *testing.T) {
@@ -83,5 +121,48 @@ func TestHandlerTaskQueryError(t *testing.T) {
 	_, err := h.HandleText(context.Background(), 1, 1, "/status t1")
 	if err == nil {
 		t.Fatal("expected error")
+	}
+}
+
+func TestHandlerCreatesTaskFromURL(t *testing.T) {
+	q := &fakeQueue{}
+	h := Handler{
+		Tasks: fakeTaskQuery{task: service.Task{
+			TaskID:       "task-1",
+			ChatID:       1,
+			UserID:       1,
+			TargetChatID: 1,
+			URL:          "https://t.me/c/1/2",
+			Status:       service.StatusQueued,
+			CreatedAt:    time.Now(),
+		}},
+		Queue: q,
+	}
+
+	reply, err := h.HandleText(context.Background(), 1, 1, "https://t.me/c/1/2")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(reply, "Task ID: task-1") {
+		t.Fatalf("unexpected reply: %s", reply)
+	}
+}
+
+func TestHandlerDuplicateURLReturnsExistingTask(t *testing.T) {
+	q := &fakeQueue{}
+	h := Handler{
+		Tasks: fakeTaskQuery{task: service.Task{
+			TaskID: "existing-task",
+			Status: service.StatusRunning,
+		}},
+		Queue: q,
+	}
+
+	reply, err := h.HandleText(context.Background(), 1, 1, "https://t.me/c/1/2")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(reply, "任务已存在") {
+		t.Fatalf("unexpected reply: %s", reply)
 	}
 }

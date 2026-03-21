@@ -1,6 +1,6 @@
 # SPEC
 
-Phase 2 forwarding scope for TGDL Bot.
+Phase 1 forwarding scope for TGDL Bot.
 
 ## Goals
 
