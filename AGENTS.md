@@ -48,3 +48,14 @@ This repository is under active concurrent editing. Do not revert, overwrite, or
 - Confirm the docs and examples mention the `tdl login` prerequisite.
 - If code is added later, verify startup checks and session preflight before queue consumption.
 
+## Container deployment constraints
+
+- Use a single runtime image for both bot and downloader, selected by `APP_MODE=bot|downloader`.
+- Pin `tdl` to a fixed release version in `Dockerfile` (`ARG TDL_VERSION`) and upgrade by rebuilding image.
+- Keep downloader session state on persistent storage (`/app/data` and `/root/.tdl` volumes).
+- Keep container defaults aligned with `.env.example`:
+  - `TDL_BIN=/usr/local/bin/tdl`
+  - `DOWNLOAD_DIR=/downloads`
+  - `SQLITE_PATH=/app/data/tasks.db`
+  - `TDL_STORAGE` optional; keep unset unless explicitly required by tdl storage driver config.
+- Do not regress to `go run`-based production compose services.

@@ -57,10 +57,40 @@ Make sure `tdl login` has been completed first, then start the downloader:
 
 The downloader performs a session preflight check before it begins consuming the queue.
 
+## Docker build and run
+
+### 1. Build one image for bot/downloader
+
+```bash
+docker build -t tgdl-bot:local --build-arg TDL_VERSION=v0.20.1 .
+```
+
+The image contains:
+- `/usr/local/bin/tgdl-bot`
+- `/usr/local/bin/tgdl-downloader`
+- `/usr/local/bin/tdl`
+
+### 2. Start with docker compose
+
+```bash
+docker compose -f deploy/docker-compose.yml up -d
+```
+
+`bot` and `downloader` use the same image and are selected by `APP_MODE`.
+
+### 3. Initialize tdl session in container context (first deployment only)
+
+Run this once before expecting downloader consumption to succeed:
+
+```bash
+docker compose -f deploy/docker-compose.yml run --rm downloader tdl login -T qr -n default
+```
+
+This login state is persisted in Docker volumes (`tgdl-data` and `tgdl-tdl-session`).
+
 ## Deployment notes
 
 - The bot and downloader may run on the same machine or separately.
 - The downloader must not consume tasks until `tdl` session preflight succeeds.
 - SQLite is used as the local task store; keep the database on persistent storage.
 - This phase does not include a web UI, object storage, or worker-based deployment.
-

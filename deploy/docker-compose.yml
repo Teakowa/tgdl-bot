@@ -1,25 +1,42 @@
 services:
   bot:
-    image: golang:1.23
-    working_dir: /app
-    command: ["/bin/sh", "-lc", "./scripts/run-bot.sh"]
+    build:
+      context: ..
+      dockerfile: Dockerfile
+      args:
+        TDL_VERSION: v0.20.1
+    image: tgdl-bot:local
+    command: ["bot"]
     env_file:
       - ../.env
+    environment:
+      APP_MODE: bot
+      TDL_BIN: /usr/local/bin/tdl
+      DOWNLOAD_DIR: /downloads
+      SQLITE_PATH: /app/data/tasks.db
     volumes:
-      - ..:/app
       - tgdl-data:/app/data
-    depends_on:
-      - downloader
+      - tgdl-downloads:/downloads
+      - tgdl-tdl-session:/root/.tdl
+    restart: unless-stopped
 
   downloader:
-    image: golang:1.23
-    working_dir: /app
-    command: ["/bin/sh", "-lc", "./scripts/run-downloader.sh"]
+    image: tgdl-bot:local
+    command: ["downloader"]
     env_file:
       - ../.env
+    environment:
+      APP_MODE: downloader
+      TDL_BIN: /usr/local/bin/tdl
+      DOWNLOAD_DIR: /downloads
+      SQLITE_PATH: /app/data/tasks.db
     volumes:
-      - ..:/app
       - tgdl-data:/app/data
+      - tgdl-downloads:/downloads
+      - tgdl-tdl-session:/root/.tdl
+    restart: unless-stopped
 
 volumes:
   tgdl-data:
+  tgdl-downloads:
+  tgdl-tdl-session:
