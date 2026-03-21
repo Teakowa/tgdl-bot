@@ -9,8 +9,9 @@ import (
 )
 
 type fakeTelegramClient struct {
-	updatesResp  telegram.GetUpdatesResponse
-	sentMessages []telegram.SendMessageRequest
+	updatesResp       telegram.GetUpdatesResponse
+	sentMessages      []telegram.SendMessageRequest
+	setReactionCalled int
 }
 
 func (f *fakeTelegramClient) GetUpdates(context.Context, telegram.GetUpdatesRequest) (telegram.GetUpdatesResponse, error) {
@@ -20,6 +21,11 @@ func (f *fakeTelegramClient) GetUpdates(context.Context, telegram.GetUpdatesRequ
 func (f *fakeTelegramClient) SendMessage(_ context.Context, req telegram.SendMessageRequest) (telegram.Message, error) {
 	f.sentMessages = append(f.sentMessages, req)
 	return telegram.Message{Chat: telegram.Chat{ID: req.ChatID}, Text: req.Text}, nil
+}
+
+func (f *fakeTelegramClient) SetMessageReaction(_ context.Context, _ telegram.SetMessageReactionRequest) error {
+	f.setReactionCalled++
+	return nil
 }
 
 func TestRuntimeProcessesUpdate(t *testing.T) {

@@ -15,6 +15,7 @@ type TaskRepository interface {
 	Update(ctx context.Context, task service.Task) error
 	FindByID(ctx context.Context, taskID string) (service.Task, error)
 	FindByIdempotencyKey(ctx context.Context, idempotencyKey string) (service.Task, error)
+	DeleteFailedByIdempotencyKey(ctx context.Context, idempotencyKey string) (int64, error)
 	ListRecentByUser(ctx context.Context, userID int64, limit int) ([]service.Task, error)
 }
 
@@ -134,6 +135,30 @@ func (r *SQLiteTaskRepository) FindByIdempotencyKey(ctx context.Context, idempot
 		return service.Task{}, fmt.Errorf("storage: find task by idempotency key %q: %w", idempotencyKey, err)
 	}
 	return task, nil
+}
+
+func (r *SQLiteTaskRepository) DeleteFailedByIdempotencyKey(ctx context.Context, idempotencyKey string) (int64, error) {
+	if r == nil || r.DB == nil {
+		return 0, errors.New("storage: nil task repository")
+	}
+
+	res, err := r.DB.ExecContext(ctx, `
+		DELETE FROM tasks
+		WHERE idempotency_key = ?
+		  AND status IN (?, ?)`,
+		idempotencyKey,
+		string(service.StatusFailed),
+		string(service.StatusDeadLettered),
+	)
+	if err != nil {
+		return 0, fmt.Errorf("storage: delete failed tasks by idempotency key %q: %w", idempotencyKey, err)
+	}
+
+	rows, err := res.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("storage: delete failed tasks rows affected: %w", err)
+	}
+	return rows, nil
 }
 
 func (r *SQLiteTaskRepository) ListRecentByUser(ctx context.Context, userID int64, limit int) ([]service.Task, error) {

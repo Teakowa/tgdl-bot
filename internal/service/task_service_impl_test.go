@@ -10,10 +10,12 @@ import (
 type fakeRepo struct {
 	byTaskID       map[string]Task
 	byIdempotency  map[string]Task
+	deleteRows     int64
 	createErr      error
 	updateErr      error
 	findByIDErr    error
 	findByIdemErr  error
+	deleteErr      error
 	listRecentResp []Task
 	listRecentErr  error
 }
@@ -79,6 +81,13 @@ func (r *fakeRepo) ListRecentByUser(context.Context, int64, int) ([]Task, error)
 	return r.listRecentResp, nil
 }
 
+func (r *fakeRepo) DeleteFailedByIdempotencyKey(_ context.Context, _ string) (int64, error) {
+	if r.deleteErr != nil {
+		return 0, r.deleteErr
+	}
+	return r.deleteRows, nil
+}
+
 func TestCreateQueuedTaskReturnsExistingByIdempotency(t *testing.T) {
 	existing := Task{TaskID: "existing", IdempotencyKey: "k", Status: StatusQueued}
 	svc := NewTaskService(&fakeRepo{byIdempotency: map[string]Task{"k": existing}})
@@ -128,5 +137,16 @@ func TestCreateQueuedTaskPropagatesRepositoryError(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("expected error")
+	}
+}
+
+func TestDeleteFailedByIdempotencyKey(t *testing.T) {
+	svc := NewTaskService(&fakeRepo{deleteRows: 2})
+	rows, err := svc.DeleteFailedByIdempotencyKey(context.Background(), "k")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if rows != 2 {
+		t.Fatalf("expected 2 deleted rows, got %d", rows)
 	}
 }

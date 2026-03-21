@@ -48,78 +48,154 @@ type Handler struct {
 }
 
 func (h Handler) HandleText(ctx context.Context, userID, chatID int64, text string) (string, error) {
+	outcome, err := h.HandleTextWithOutcome(ctx, userID, chatID, text)
+	if err != nil {
+		return "", err
+	}
+	return outcome.Reply, nil
+}
+
+type HandleTextOutcome struct {
+	Reply         string
+	ReactionEmoji string
+}
+
+func (h Handler) HandleTextWithOutcome(ctx context.Context, userID, chatID int64, text string) (HandleTextOutcome, error) {
 	if !IsAllowedUser(h.AllowedUserIDs, userID) {
-		return "无权限使用该机器人。", nil
+		return HandleTextOutcome{Reply: "无权限使用该机器人。"}, nil
 	}
 
 	cmd := ParseCommand(text)
 	switch cmd.Name {
 	case CommandStart, CommandHelp:
-		return BuildCommandReply(cmd), nil
+		return HandleTextOutcome{Reply: BuildCommandReply(cmd)}, nil
 	case CommandStatus:
 		if cmd.TaskID == "" {
-			return BuildCommandReply(cmd), nil
+			return HandleTextOutcome{Reply: BuildCommandReply(cmd)}, nil
 		}
 		if h.Tasks == nil {
-			return "状态查询暂未启用。", nil
+			return HandleTextOutcome{Reply: "状态查询暂未启用。"}, nil
 		}
 		task, err := h.Tasks.GetTask(ctx, cmd.TaskID)
 		if err != nil {
-			return "", err
+			return HandleTextOutcome{}, err
 		}
-		return formatStatus(task), nil
+		return HandleTextOutcome{
+			Reply:         formatStatus(task),
+			ReactionEmoji: statusReaction(task.Status),
+		}, nil
 	case CommandLast:
 		if h.Tasks == nil {
-			return "最近任务查询暂未启用。", nil
+			return HandleTextOutcome{Reply: "最近任务查询暂未启用。"}, nil
 		}
 		tasks, err := h.Tasks.ListRecentTasks(ctx, userID, 10)
 		if err != nil {
-			return "", err
+			return HandleTextOutcome{}, err
 		}
-		return formatLast(tasks), nil
+		return HandleTextOutcome{Reply: formatLast(tasks)}, nil
 	default:
 		url, ok := ExtractTaskURL(text)
 		if !ok {
-			return "", nil
+			return HandleTextOutcome{}, nil
 		}
 		if h.Tasks == nil || h.Queue == nil {
-			return "任务创建暂未启用。", nil
+			return HandleTextOutcome{Reply: "任务创建暂未启用。"}, nil
 		}
 
 		newTaskIDValue := newTaskID()
 		idempotencyKey := service.NewIdempotencyKey(userID, url)
-		task, err := h.Tasks.CreateQueuedTask(ctx, service.CreateQueuedTaskRequest{
+		req := service.CreateQueuedTaskRequest{
 			TaskID:         newTaskIDValue,
 			ChatID:         chatID,
 			UserID:         userID,
 			TargetChatID:   chatID,
 			URL:            url,
 			IdempotencyKey: idempotencyKey,
-		})
+		}
+		task, err := h.Tasks.CreateQueuedTask(ctx, req)
 		if err != nil {
-			return "任务创建失败，请稍后重试。", nil
+			return HandleTextOutcome{Reply: "任务创建失败，请稍后重试。"}, nil
 		}
 		if task.TaskID != newTaskIDValue {
-			return fmt.Sprintf("任务已存在\nTask ID: %s\n状态: %s", task.TaskID, task.Status), nil
+			if isRebuildableStatus(task.Status) {
+				if _, err := h.Tasks.DeleteFailedByIdempotencyKey(ctx, idempotencyKey); err != nil {
+					return HandleTextOutcome{Reply: fmt.Sprintf("任务重建失败\nTask ID: %s", task.TaskID), ReactionEmoji: statusReaction(task.Status)}, nil
+				}
+
+				rebuildTaskID := newTaskID()
+				req.TaskID = rebuildTaskID
+				task, err = h.Tasks.CreateQueuedTask(ctx, req)
+				if err != nil {
+					return HandleTextOutcome{Reply: "任务重建失败，请稍后重试。", ReactionEmoji: statusReaction(service.StatusFailed)}, nil
+				}
+				if task.TaskID != rebuildTaskID {
+					return HandleTextOutcome{
+						Reply:         fmt.Sprintf("任务已存在\nTask ID: %s\n状态: %s", task.TaskID, task.Status),
+						ReactionEmoji: statusReaction(task.Status),
+					}, nil
+				}
+				if err := h.enqueueTask(ctx, task); err != nil {
+					return HandleTextOutcome{Reply: fmt.Sprintf("任务重建后入队失败\nTask ID: %s", task.TaskID), ReactionEmoji: statusReaction(service.StatusFailed)}, nil
+				}
+				return HandleTextOutcome{
+					Reply:         fmt.Sprintf("检测到历史失败任务，已重新创建并入队\nTask ID: %s\nURL: %s", task.TaskID, task.URL),
+					ReactionEmoji: statusReaction(task.Status),
+				}, nil
+			}
+			return HandleTextOutcome{
+				Reply:         fmt.Sprintf("任务已存在\nTask ID: %s\n状态: %s", task.TaskID, task.Status),
+				ReactionEmoji: statusReaction(task.Status),
+			}, nil
 		}
 
-		if err := h.Queue.Enqueue(ctx, queue.Message{
-			TaskID:       task.TaskID,
-			ChatID:       task.ChatID,
-			UserID:       task.UserID,
-			TargetChatID: task.TargetChatID,
-			URL:          task.URL,
-			CreatedAt:    task.CreatedAt,
-			Idempotency:  task.IdempotencyKey,
-		}); err != nil {
-			msg := err.Error()
-			_ = h.Tasks.UpdateTask(ctx, task.TaskID, service.TaskUpdate{
-				Status:       service.StatusFailed,
-				ErrorMessage: &msg,
-			})
-			return fmt.Sprintf("任务入队失败\nTask ID: %s", task.TaskID), nil
+		if err := h.enqueueTask(ctx, task); err != nil {
+			return HandleTextOutcome{Reply: fmt.Sprintf("任务入队失败\nTask ID: %s", task.TaskID), ReactionEmoji: statusReaction(service.StatusFailed)}, nil
 		}
-		return fmt.Sprintf("转发任务已加入队列\nTask ID: %s\nURL: %s", task.TaskID, task.URL), nil
+		return HandleTextOutcome{
+			Reply:         fmt.Sprintf("转发任务已加入队列\nTask ID: %s\nURL: %s", task.TaskID, task.URL),
+			ReactionEmoji: statusReaction(task.Status),
+		}, nil
+	}
+}
+
+func (h Handler) enqueueTask(ctx context.Context, task service.Task) error {
+	if err := h.Queue.Enqueue(ctx, queue.Message{
+		TaskID:       task.TaskID,
+		ChatID:       task.ChatID,
+		UserID:       task.UserID,
+		TargetChatID: task.TargetChatID,
+		URL:          task.URL,
+		CreatedAt:    task.CreatedAt,
+		Idempotency:  task.IdempotencyKey,
+	}); err != nil {
+		msg := err.Error()
+		_ = h.Tasks.UpdateTask(ctx, task.TaskID, service.TaskUpdate{
+			Status:       service.StatusFailed,
+			ErrorMessage: &msg,
+		})
+		return err
+	}
+	return nil
+}
+
+func isRebuildableStatus(status service.Status) bool {
+	return status == service.StatusFailed || status == service.StatusDeadLettered
+}
+
+func statusReaction(status service.Status) string {
+	switch status {
+	case service.StatusQueued:
+		return "⏳"
+	case service.StatusRunning:
+		return "⚙️"
+	case service.StatusDone:
+		return "✅"
+	case service.StatusRetrying:
+		return "🔁"
+	case service.StatusFailed, service.StatusDeadLettered:
+		return "❌"
+	default:
+		return ""
 	}
 }
 

@@ -60,16 +60,24 @@ func (r Runtime) Run(ctx context.Context) error {
 			if update.UpdateID >= offset {
 				offset = update.UpdateID + 1
 			}
-			req, err := r.Handler.HandleUpdate(ctx, update)
+			outcome, err := r.Handler.HandleUpdate(ctx, update)
 			if err != nil {
 				r.log("handle update failed", "update_id", update.UpdateID, "error", err)
 				continue
 			}
-			if req == nil {
+			if outcome == nil {
 				continue
 			}
-			if _, err := r.Client.SendMessage(ctx, *req); err != nil {
-				r.log("send message failed", "chat_id", req.ChatID, "error", err)
+			if outcome.ReactionRequest != nil {
+				if err := r.Client.SetMessageReaction(ctx, *outcome.ReactionRequest); err != nil {
+					r.log("set message reaction failed", "chat_id", outcome.ReactionRequest.ChatID, "message_id", outcome.ReactionRequest.MessageID, "error", err)
+				}
+			}
+			if outcome.SendRequest == nil {
+				continue
+			}
+			if _, err := r.Client.SendMessage(ctx, *outcome.SendRequest); err != nil {
+				r.log("send message failed", "chat_id", outcome.SendRequest.ChatID, "error", err)
 				continue
 			}
 		}

@@ -15,6 +15,7 @@ type TaskRepository interface {
 	Update(ctx context.Context, task Task) error
 	FindByID(ctx context.Context, taskID string) (Task, error)
 	FindByIdempotencyKey(ctx context.Context, idempotencyKey string) (Task, error)
+	DeleteFailedByIdempotencyKey(ctx context.Context, idempotencyKey string) (int64, error)
 	ListRecentByUser(ctx context.Context, userID int64, limit int) ([]Task, error)
 }
 
@@ -106,6 +107,20 @@ func (s taskService) FindByIdempotencyKey(ctx context.Context, idempotencyKey st
 		return Task{}, fmt.Errorf("service: find by idempotency key: %w", err)
 	}
 	return task, nil
+}
+
+func (s taskService) DeleteFailedByIdempotencyKey(ctx context.Context, idempotencyKey string) (int64, error) {
+	if s.repo == nil {
+		return 0, errors.New("service: task repository is required")
+	}
+	if strings.TrimSpace(idempotencyKey) == "" {
+		return 0, errors.New("service: idempotency key is required")
+	}
+	rows, err := s.repo.DeleteFailedByIdempotencyKey(ctx, strings.TrimSpace(idempotencyKey))
+	if err != nil {
+		return 0, fmt.Errorf("service: delete failed tasks by idempotency key: %w", err)
+	}
+	return rows, nil
 }
 
 func (s taskService) UpdateTask(ctx context.Context, taskID string, update TaskUpdate) error {

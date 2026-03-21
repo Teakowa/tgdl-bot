@@ -128,6 +128,53 @@ func (c *HTTPClient) SendMessage(ctx context.Context, req SendMessageRequest) (M
 	return out.Result, nil
 }
 
+func (c *HTTPClient) SetMessageReaction(ctx context.Context, req SetMessageReactionRequest) error {
+	payload := map[string]any{
+		"chat_id":    req.ChatID,
+		"message_id": req.MessageID,
+		"reaction":   req.Reaction,
+	}
+	if req.IsBig {
+		payload["is_big"] = true
+	}
+
+	b, err := json.Marshal(payload)
+	if err != nil {
+		return err
+	}
+
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.methodURL("setMessageReaction"), bytes.NewReader(b))
+	if err != nil {
+		return err
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.httpClient.Do(httpReq)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return err
+	}
+
+	var out struct {
+		Ok          bool   `json:"ok"`
+		Result      bool   `json:"result"`
+		ErrorCode   int    `json:"error_code,omitempty"`
+		Description string `json:"description,omitempty"`
+	}
+	if err := json.Unmarshal(body, &out); err != nil {
+		return fmt.Errorf("telegram setMessageReaction decode: %w", err)
+	}
+	if !out.Ok {
+		return fmt.Errorf("telegram setMessageReaction api error: %d %s", out.ErrorCode, out.Description)
+	}
+	return nil
+}
+
 func (c *HTTPClient) methodURL(method string) string {
 	return fmt.Sprintf("%s/bot%s/%s", c.baseURL, c.botToken, method)
 }
