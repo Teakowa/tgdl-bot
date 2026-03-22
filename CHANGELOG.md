@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.2.2](https://github.com/Teakowa/tgdl-bot/compare/v1.2.1...v1.2.2) (2026-03-22)
+
+
+### Bug Fixes
+
+* **downloader:** recover stale running tasks ([ec870a6](https://github.com/Teakowa/tgdl-bot/commit/ec870a6304f6aaf8eb14df6a2febdae8b5f79bec))
+* **release:** update GitHub token reference in release workflow ([d38d0b6](https://github.com/Teakowa/tgdl-bot/commit/d38d0b6c6374ba08b67359dfd12609f7cdd259d6))
+
 ## [1.2.1](https://github.com/Teakowa/tgdl-bot/compare/v1.2.0...v1.2.1) (2026-03-22)
 
 
