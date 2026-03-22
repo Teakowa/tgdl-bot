@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.3.1](https://github.com/Teakowa/tgdl-bot/compare/v1.3.0...v1.3.1) (2026-03-22)
+
+
+### Bug Fixes
+
+* **bot:** edit callback menus in place ([b341938](https://github.com/Teakowa/tgdl-bot/commit/b341938fd2593ed3d7a264bdef65b5cc8f871245))
+* **bot:** support replacement retry from queue menus ([434cc37](https://github.com/Teakowa/tgdl-bot/commit/434cc375c2ca704ac1169f6ee1a93e58e79aabff))
+
 ## [1.3.0](https://github.com/Teakowa/tgdl-bot/compare/v1.2.2...v1.3.0) (2026-03-22)
 
 
