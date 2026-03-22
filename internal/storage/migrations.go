@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"regexp"
 	"strings"
 )
 
@@ -21,6 +22,14 @@ type Migration struct {
 type MigrationRunner struct {
 	Exec Execer
 }
+
+type conditionalAddColumnStatement struct {
+	TableName  string
+	ColumnName string
+	AlterSQL   string
+}
+
+var alterTableAddColumnIfNotExistsPattern = regexp.MustCompile(`(?is)^ALTER\s+TABLE\s+([^\s]+)\s+ADD\s+COLUMN\s+IF\s+NOT\s+EXISTS\s+([^\s]+)\s+(.+)$`)
 
 func NewMigrationRunner(exec Execer) *MigrationRunner {
 	return &MigrationRunner{Exec: exec}
@@ -78,4 +87,28 @@ func splitStatements(sqlText string) []string {
 		}
 	}
 	return statements
+}
+
+func parseConditionalAddColumnStatement(statement string) (conditionalAddColumnStatement, bool) {
+	matches := alterTableAddColumnIfNotExistsPattern.FindStringSubmatch(strings.TrimSpace(statement))
+	if len(matches) != 4 {
+		return conditionalAddColumnStatement{}, false
+	}
+
+	tableName := strings.TrimSpace(matches[1])
+	columnName := strings.TrimSpace(matches[2])
+	columnDef := strings.TrimSpace(matches[3])
+	if tableName == "" || columnName == "" || columnDef == "" {
+		return conditionalAddColumnStatement{}, false
+	}
+
+	return conditionalAddColumnStatement{
+		TableName:  tableName,
+		ColumnName: columnName,
+		AlterSQL:   fmt.Sprintf("ALTER TABLE %s ADD COLUMN %s %s", tableName, columnName, columnDef),
+	}, true
+}
+
+func normalizeIdentifier(name string) string {
+	return strings.Trim(strings.TrimSpace(name), "\"'`[]")
 }
