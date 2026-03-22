@@ -8,6 +8,9 @@ Go-based Telegram message forwarding bot and downloader for the current producti
 - `cmd/downloader`: downloader service entrypoint
 - `scripts/run-bot.sh`: local launcher for the bot service
 - `scripts/run-downloader.sh`: local launcher for the downloader service
+- `deploy/docker-compose.yml`: combined dev compose entrypoint
+- `deploy/docker-compose.bot.yml`: prod bot compose entrypoint
+- `deploy/docker-compose.downloader.yml`: prod downloader compose entrypoint
 
 ## Prerequisites
 
@@ -89,6 +92,7 @@ The execution model is: `message URL -> queue -> tdl forward`.
 Downloader does not call Telegram Bot API directly.
 On startup, downloader also re-enqueues historical failed/dead-lettered tasks that are still below the retry cap.
 Only one active downloader may use the same `TDL_NAMESPACE`/storage because `tdl` session storage is single-process.
+Task state is persisted in D1, and downloader status changes are published to `CF_STATUS_QUEUE_ID` for the bot to sync back into Telegram.
 
 ## Docker compose
 
@@ -161,3 +165,4 @@ Container image publication remains tag-driven: when the release workflow create
 - This system does not include a web UI, object storage, or worker-based deployment.
 - Bot accepts Telegram message URLs directly and also supports `/forward <source_url> <target> [--drop-caption]`.
 - In webhook mode, route HTTPS traffic to bot listen address (`TELEGRAM_WEBHOOK_LISTEN_ADDR`, default `:8080`) and configure `TELEGRAM_WEBHOOK_SECRET`.
+- Local scripts and `dev` compose read `.env`; `prod` compose reads only exported or injected environment variables.

@@ -12,6 +12,16 @@ All configuration is read from environment variables.
 - `TELEGRAM_WEBHOOK_LISTEN_ADDR`: optional listen address for webhook HTTP server, defaults to `:8080`
 - `TELEGRAM_ALLOWED_USER_IDS`: optional comma-separated allowlist of Telegram user IDs
 
+Bot-only variables:
+
+- `TELEGRAM_BOT_TOKEN`
+- `TELEGRAM_API_BASE`
+- `TELEGRAM_USE_WEBHOOK`
+- `TELEGRAM_WEBHOOK_URL`
+- `TELEGRAM_WEBHOOK_SECRET`
+- `TELEGRAM_WEBHOOK_LISTEN_ADDR`
+- `TELEGRAM_ALLOWED_USER_IDS`
+
 ## Cloudflare (Queue + D1)
 
 - `CF_ACCOUNT_ID`: required Cloudflare account ID
@@ -33,6 +43,16 @@ All configuration is read from environment variables.
 - `DOWNLOADER_WORKERS`: optional worker count, defaults to `1` and must remain `1` because `tdl` session storage cannot be shared by multiple active downloader workers or replicas
 - `TASK_TIMEOUT_MINUTES`: optional per-task timeout, defaults to `180` (3 hours, timeout tasks are marked failed and acked)
 
+Downloader-only variables:
+
+- `TDL_BIN`
+- `TDL_NAMESPACE`
+- `TDL_STORAGE`
+- `TDL_LOGIN_REQUIRED`
+- `TDL_LOGIN_CHECK_ON_START`
+- `DOWNLOADER_WORKERS`
+- `TASK_TIMEOUT_MINUTES`
+
 ## Runtime
 
 - `LOG_LEVEL`: optional log level
@@ -44,6 +64,7 @@ All configuration is read from environment variables.
 - `DOWNLOADER_IMAGE_TAG`: optional downloader image tag for `ghcr.io/teakowa/tgdl-downloader`, defaults to `latest`
 - `prod` compose (`deploy/docker-compose.bot.yml` and `deploy/docker-compose.downloader.yml`) reads these values and all runtime configuration from the deployment environment or CI-injected variables, not from the repository `.env`
 - `dev` compose (`deploy/docker-compose.yml`) continues to read `../.env`
+- local scripts (`scripts/run-bot.sh` and `scripts/run-downloader.sh`) also load `.env` when present
 
 ## Current defaults and constraints
 

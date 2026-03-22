@@ -49,6 +49,7 @@ Only one active downloader may use the same `TDL_NAMESPACE`/storage because `tdl
 - If `target_peer` is omitted or empty, downloader will not pass `--to` and `tdl forward` uses the default destination behavior.
 - `drop_caption=true` maps to `tdl forward --mode clone --edit '""'`.
 - `drop_caption=false` maps to `tdl forward --mode direct`.
+- `idempotency_key` is included when the bot enqueues the task.
 
 ### Status queue message (`CF_STATUS_QUEUE_ID`)
 
@@ -77,6 +78,8 @@ Only one active downloader may use the same `TDL_NAMESPACE`/storage because `tdl
 - `updated_at`
 - `started_at`
 - `finished_at`
+- `source_message_id`
+- `status_message_id`
 - `retry_count`
 - `lease_id`
 - `output_summary`
@@ -85,6 +88,17 @@ Only one active downloader may use the same `TDL_NAMESPACE`/storage because `tdl
 - `idempotency_key`
 
 ### Status values
+
+- `queued`
+- `running`
+- `paused`
+- `cancelled`
+- `done`
+- `failed`
+- `retrying`
+- `dead_lettered`
+
+Public queue-processing flow currently uses:
 
 - `queued`
 - `running`

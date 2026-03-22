@@ -10,6 +10,7 @@ Current forwarding scope for TGDL Bot.
 - Dedicated status queue for downloader-to-bot task status synchronization
 - Basic idempotency and duplicate protection
 - Session preflight before downloader starts consuming tasks
+- Startup retry scan that re-enqueues failed or dead-lettered tasks still below retry budget
 - Single active downloader execution per `TDL_NAMESPACE`/storage
 
 ## Non-goals
@@ -81,7 +82,9 @@ Current forwarding scope for TGDL Bot.
 - Bot does not expose interactive login.
 - Bot prefers webhook mode when configured, and otherwise falls back to long polling.
 - Polling mode deletes outgoing webhook before `getUpdates` to satisfy Telegram API mutual exclusion.
+- Polling conflict recovery retries after deleting webhook with `drop_pending_updates=false`.
 - Queue split is required: `CF_QUEUE_ID` (task queue) and `CF_STATUS_QUEUE_ID` (status queue) must be different values.
+- Downloader publishes status events to `CF_STATUS_QUEUE_ID`; bot consumes those events, re-reads task state from D1, and syncs Telegram task status/reaction.
 
 ## Deployment prerequisite
 

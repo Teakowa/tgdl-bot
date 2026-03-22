@@ -7,6 +7,8 @@ Authoritative compose workflow by environment.
 - `prod`: use GHCR images and deploy `bot` / `downloader` independently.
 - `dev`: use local build images and start both services from one compose file.
 - This guide intentionally treats independent deployment as a production concern.
+- `prod` reads only exported or injected environment variables, not the repository `.env`.
+- `dev` compose and local scripts read the repository `.env`.
 
 ## Compose entrypoints
 
@@ -165,3 +167,6 @@ docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.build.yml c
 - Downloader does not need Telegram bot token; it publishes task status updates to `CF_STATUS_QUEUE_ID`.
 - Bot consumes `CF_STATUS_QUEUE_ID`, refreshes task state from D1, then syncs Telegram task status/reaction.
 - Keep `TDL_NAMESPACE` aligned with the namespace used in `tdl login`.
+- Queue direction is fixed:
+  - `CF_QUEUE_ID`: `bot -> downloader`
+  - `CF_STATUS_QUEUE_ID`: `downloader -> bot`
