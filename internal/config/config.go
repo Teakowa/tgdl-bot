@@ -152,7 +152,7 @@ func load(target loadTarget) (Config, error) {
 		errs = append(errs, fmt.Errorf("DOWNLOADER_WORKERS must be greater than zero"))
 	}
 	if target == loadTargetDownloader && cfg.Downloader.Workers > 1 {
-		errs = append(errs, fmt.Errorf("DOWNLOADER_WORKERS must be 1 in phase 1: tdl session storage is single-process and cannot be shared by multiple active downloader workers or replicas"))
+		errs = append(errs, fmt.Errorf("DOWNLOADER_WORKERS must be 1: tdl session storage is single-process and cannot be shared by multiple active downloader workers or replicas"))
 	}
 	if cfg.Downloader.TaskTimeoutMinutes <= 0 {
 		errs = append(errs, fmt.Errorf("TASK_TIMEOUT_MINUTES must be greater than zero"))

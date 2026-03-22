@@ -1,6 +1,6 @@
 # API
 
-Phase 1 forwarding scope only.
+Current forwarding behavior and message contracts.
 
 ## External APIs
 
@@ -27,7 +27,7 @@ Used by bot and downloader to read/write task state in a shared database.
 ### `tdl`
 
 Used by the downloader service to perform message forward work.
-Phase 1 supports only one active downloader per `TDL_NAMESPACE`/storage because `tdl` session storage is single-process.
+Only one active downloader may use the same `TDL_NAMESPACE`/storage because `tdl` session storage is single-process.
 
 ## Internal data contracts
 
@@ -88,7 +88,7 @@ Phase 1 supports only one active downloader per `TDL_NAMESPACE`/storage because 
 - `retrying`
 - `dead_lettered`
 
-## Phase 1 behavior summary
+## Current behavior summary
 
 - Bot accepts Telegram URLs only.
 - Bot prefers webhook mode when `TELEGRAM_USE_WEBHOOK=true` and `TELEGRAM_WEBHOOK_URL` is set.

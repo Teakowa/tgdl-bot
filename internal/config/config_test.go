@@ -102,7 +102,7 @@ func TestLoadForDownloaderRejectsMultipleWorkers(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected validation error")
 	}
-	if !strings.Contains(err.Error(), "DOWNLOADER_WORKERS must be 1 in phase 1") {
+	if !strings.Contains(err.Error(), "DOWNLOADER_WORKERS must be 1") {
 		t.Fatalf("expected downloader worker validation error, got %v", err)
 	}
 }

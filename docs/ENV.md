@@ -30,7 +30,7 @@ All configuration is read from environment variables.
 - `TDL_STORAGE`: optional `tdl` storage value
 - `TDL_LOGIN_REQUIRED`: optional boolean, defaults to `true`
 - `TDL_LOGIN_CHECK_ON_START`: optional boolean, defaults to `true`
-- `DOWNLOADER_WORKERS`: optional worker count, defaults to `1` and must remain `1` in phase 1 because `tdl` session storage is single-process
+- `DOWNLOADER_WORKERS`: optional worker count, defaults to `1` and must remain `1` because `tdl` session storage cannot be shared by multiple active downloader workers or replicas
 - `TASK_TIMEOUT_MINUTES`: optional per-task timeout, defaults to `180` (3 hours, timeout tasks are marked failed and acked)
 
 ## Runtime
@@ -45,9 +45,9 @@ All configuration is read from environment variables.
 - `prod` compose (`deploy/docker-compose.bot.yml` and `deploy/docker-compose.downloader.yml`) reads these values and all runtime configuration from the deployment environment or CI-injected variables, not from the repository `.env`
 - `dev` compose (`deploy/docker-compose.yml`) continues to read `../.env`
 
-## Phase 1 defaults
+## Current defaults and constraints
 
-The phase 1 scaffold assumes:
+The current deployment assumes:
 
 - webhook mode only when both `TELEGRAM_USE_WEBHOOK=true` and `TELEGRAM_WEBHOOK_URL` is set; otherwise long polling
 - polling mode deletes outgoing webhook (`drop_pending_updates=false`) before reading updates

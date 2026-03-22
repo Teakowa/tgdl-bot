@@ -30,7 +30,7 @@ func (p StartupPreflight) Check(ctx context.Context, cfg StartupConfig) error {
 		return errors.New("downloader preflight: empty tdl namespace")
 	}
 	if cfg.Workers > 1 {
-		return fmt.Errorf("downloader preflight: DOWNLOADER_WORKERS must be 1 in phase 1 because tdl session storage is single-process and cannot be shared by multiple active downloader workers or replicas")
+		return fmt.Errorf("downloader preflight: DOWNLOADER_WORKERS must be 1 because tdl session storage is single-process and cannot be shared by multiple active downloader workers or replicas")
 	}
 
 	if p.Runner == nil {

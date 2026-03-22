@@ -1,6 +1,6 @@
 # TGDL Bot
 
-Go-based Telegram message forwarding bot and downloader scaffold for the phase 1 spec.
+Go-based Telegram message forwarding bot and downloader for the current production deployment model.
 
 ## What this repo contains
 
@@ -67,7 +67,7 @@ The downloader performs a session preflight check before it begins consuming the
 The execution model is: `message URL -> queue -> tdl forward`.
 Downloader does not call Telegram Bot API directly.
 On startup, downloader also re-enqueues historical failed/dead-lettered tasks that are still below the retry cap.
-Phase 1 supports only one active downloader per `TDL_NAMESPACE`/storage because `tdl` session storage is single-process.
+Only one active downloader may use the same `TDL_NAMESPACE`/storage because `tdl` session storage is single-process.
 
 ## Docker compose
 
@@ -121,8 +121,8 @@ For full commands (`build`/`pull`/`up`) and `tdl login` bootstrap, see [docs/DEP
 - Downloader writes task state to D1 and emits status events to `CF_STATUS_QUEUE_ID`.
 - Bot consumes `CF_STATUS_QUEUE_ID`, refreshes task state from D1, and updates Telegram status/reaction.
 - Atomic task claim only prevents duplicate queue ownership; it does not make `tdl` safe for multi-process access to the same session/storage.
-- Phase 1 allows only one active downloader replica per `TDL_NAMESPACE`/storage. Horizontal scale requires separate `tdl` sessions/storage plus explicit sharding, which is out of scope here.
+- Only one active downloader replica may use the same `TDL_NAMESPACE`/storage. Horizontal scale requires separate `tdl` sessions/storage plus explicit sharding, which is out of scope here.
 - Task execution timeout defaults to 3 hours (`TASK_TIMEOUT_MINUTES=180`); timeout tasks are marked failed and removed from queue.
-- This phase does not include a web UI, object storage, or worker-based deployment.
+- This system does not include a web UI, object storage, or worker-based deployment.
 - Bot accepts Telegram message URLs only and creates forward tasks.
 - In webhook mode, route HTTPS traffic to bot listen address (`TELEGRAM_WEBHOOK_LISTEN_ADDR`, default `:8080`) and configure `TELEGRAM_WEBHOOK_SECRET`.

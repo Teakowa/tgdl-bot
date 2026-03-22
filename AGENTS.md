@@ -35,17 +35,17 @@ rtk git add . && rtk git commit -m "msg" && rtk git push
 - Keep shell usage non-destructive.
 - Use ASCII by default.
 - Do not introduce shell-based `tdl` invocation in future code; use `exec.CommandContext`.
-- Do not add worker-based, web UI, or object storage assumptions in phase 1.
+- Do not add worker-based, web UI, or object storage assumptions to the current deployment model.
 
 ## Required implementation order
 
-1. Read `tgdl_bot_project_spec.md` and the current tree before editing.
+1. Read the current tree before editing.
 2. Update docs and engineering scaffolding first.
 3. Add or adjust env examples and deployment samples to match the spec.
 4. Add scripts only after the target entrypoints are known.
 5. Validate the final tree and confirm no unrelated files were changed.
 
-## Phase 1 constraints from spec
+## Current architecture constraints
 
 - Go is the primary implementation language.
 - The downloader must perform a session preflight check before pulling queue messages.
@@ -53,7 +53,7 @@ rtk git add . && rtk git commit -m "msg" && rtk git push
 - The bot accepts only Telegram message URLs and a small command surface.
 - SQLite is the local store.
 - Cloudflare Queue is used only as a queue, not as a Workers runtime.
-- No interactive login flow through the bot in phase 1.
+- No interactive login flow through the bot.
 
 ## Acceptance checklist
 
@@ -61,7 +61,6 @@ rtk git add . && rtk git commit -m "msg" && rtk git push
 - README states the `tdl login` prerequisite.
 - `docs/ENV.md` documents all spec env vars.
 - `docs/API.md` describes the external APIs and internal message/task contracts.
-- `docs/SPEC.md` captures the phase 1 skeleton scope and constraints.
 - `.env.example` includes every spec env var with sensible defaults or placeholders.
 - `deploy/docker-compose.yml` shows bot, downloader, and persistent volumes for SQLite/downloads.
 - `scripts/run-bot.sh` and `scripts/run-downloader.sh` launch the correct Go entrypoints.
