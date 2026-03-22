@@ -42,6 +42,8 @@ All configuration is read from environment variables.
 
 - `BOT_IMAGE_TAG`: optional bot image tag for `ghcr.io/teakowa/tgdl-bot`, defaults to `latest`
 - `DOWNLOADER_IMAGE_TAG`: optional downloader image tag for `ghcr.io/teakowa/tgdl-downloader`, defaults to `latest`
+- `prod` compose (`deploy/docker-compose.bot.yml` and `deploy/docker-compose.downloader.yml`) reads these values and all runtime configuration from the deployment environment or CI-injected variables, not from the repository `.env`
+- `dev` compose (`deploy/docker-compose.yml`) continues to read `../.env`
 
 ## Phase 1 defaults
 

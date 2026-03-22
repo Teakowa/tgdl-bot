@@ -15,9 +15,9 @@ Authoritative compose workflow by environment.
 - `prod` downloader: `deploy/docker-compose.downloader.yml`
 - compatibility build overlay: `deploy/docker-compose.build.yml` (optional)
 
-## Common prerequisites
+## dev prerequisites
 
-### 1. Configure environment
+### 1. Configure `.env`
 
 ```bash
 cp .env.example .env
@@ -29,14 +29,40 @@ Set both queue IDs and keep them different:
 - `CF_QUEUE_ID` for task queue (`bot -> downloader`)
 - `CF_STATUS_QUEUE_ID` for status queue (`downloader -> bot`)
 
-### 2. Configure tags for `prod` in `.env`
+## prod prerequisites
+
+`prod` compose does not read `../.env`. Inject all required variables from the deployment shell, CI, or secret manager before running compose.
+
+### 1. Export runtime variables
+
+At minimum, export the variables required by the target service:
+
+- bot: `TELEGRAM_BOT_TOKEN`, `CF_ACCOUNT_ID`, `CF_D1_DATABASE_ID`, `CF_QUEUE_ID`, `CF_STATUS_QUEUE_ID`, `CF_API_TOKEN`
+- downloader: `CF_ACCOUNT_ID`, `CF_D1_DATABASE_ID`, `CF_QUEUE_ID`, `CF_STATUS_QUEUE_ID`, `CF_API_TOKEN`
+
+Optional variables such as `TELEGRAM_USE_WEBHOOK`, `TELEGRAM_WEBHOOK_URL`, `TELEGRAM_WEBHOOK_SECRET`, `TDL_NAMESPACE`, and queue tuning values can be exported the same way when needed.
+
+Example:
+
+```bash
+export TELEGRAM_BOT_TOKEN=...
+export CF_ACCOUNT_ID=...
+export CF_D1_DATABASE_ID=...
+export CF_QUEUE_ID=...
+export CF_STATUS_QUEUE_ID=...
+export CF_API_TOKEN=...
+```
+
+### 2. Export image tags for `prod`
 
 Pin to release tags or immutable `sha-*` tags:
 
 ```bash
-BOT_IMAGE_TAG=sha-<git-sha>
-DOWNLOADER_IMAGE_TAG=sha-<git-sha>
+export BOT_IMAGE_TAG=sha-<git-sha>
+export DOWNLOADER_IMAGE_TAG=sha-<git-sha>
 ```
+
+Or inject the same values from CI secrets/variables instead of exporting them manually.
 
 ### 3. GHCR access (when required)
 
@@ -48,27 +74,38 @@ docker login ghcr.io
 
 ## prod workflow (independent deployment)
 
-### 1. Initialize downloader session (first deployment on the target host)
+### 1. Validate rendered compose after variable changes
+
+Whenever you change the exported variables or update either prod compose file, render the final config before deployment:
+
+```bash
+docker compose -f deploy/docker-compose.bot.yml config
+docker compose -f deploy/docker-compose.downloader.yml config
+```
+
+After variable or compose changes, rerun `pull` and `up -d` so the containers pick up the new values.
+
+### 2. Initialize downloader session (first deployment on the target host)
 
 ```bash
 docker compose -f deploy/docker-compose.downloader.yml run --rm --entrypoint /usr/local/bin/tdl downloader login -T qr -n default
 ```
 
-### 2. Deploy bot service
+### 3. Deploy bot service
 
 ```bash
 docker compose -f deploy/docker-compose.bot.yml pull
 docker compose -f deploy/docker-compose.bot.yml up -d
 ```
 
-### 3. Deploy downloader service
+### 4. Deploy downloader service
 
 ```bash
 docker compose -f deploy/docker-compose.downloader.yml pull
 docker compose -f deploy/docker-compose.downloader.yml up -d
 ```
 
-### 4. Scale downloader (optional)
+### 5. Scale downloader (optional)
 
 ```bash
 docker compose -f deploy/docker-compose.downloader.yml up -d --scale downloader=3

@@ -1,10 +1,24 @@
 services:
   downloader:
     image: ghcr.io/teakowa/tgdl-downloader:${DOWNLOADER_IMAGE_TAG:-latest}
-    env_file:
-      - ../.env
     environment:
-      TDL_BIN: /usr/local/bin/tdl
+      ENV: ${ENV:-prod}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      CF_ACCOUNT_ID: ${CF_ACCOUNT_ID}
+      CF_D1_DATABASE_ID: ${CF_D1_DATABASE_ID}
+      CF_QUEUE_ID: ${CF_QUEUE_ID}
+      CF_STATUS_QUEUE_ID: ${CF_STATUS_QUEUE_ID}
+      CF_API_TOKEN: ${CF_API_TOKEN}
+      CF_QUEUE_BATCH_SIZE: ${CF_QUEUE_BATCH_SIZE:-5}
+      CF_QUEUE_VISIBILITY_TIMEOUT_MS: ${CF_QUEUE_VISIBILITY_TIMEOUT_MS:-900000}
+      CF_QUEUE_PULL_INTERVAL_MS: ${CF_QUEUE_PULL_INTERVAL_MS:-3000}
+      TDL_BIN: ${TDL_BIN:-/usr/local/bin/tdl}
+      TDL_NAMESPACE: ${TDL_NAMESPACE:-default}
+      TDL_STORAGE: ${TDL_STORAGE:-}
+      TDL_LOGIN_REQUIRED: ${TDL_LOGIN_REQUIRED:-true}
+      TDL_LOGIN_CHECK_ON_START: ${TDL_LOGIN_CHECK_ON_START:-true}
+      DOWNLOADER_WORKERS: ${DOWNLOADER_WORKERS:-2}
+      TASK_TIMEOUT_MINUTES: ${TASK_TIMEOUT_MINUTES:-180}
     volumes:
       - tgdl-tdl-session:/root/.tdl
     restart: unless-stopped

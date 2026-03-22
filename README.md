@@ -75,9 +75,20 @@ Use split compose by environment:
 - `prod` uses GHCR images and is intended for independent deployment (`bot` and `downloader` separately).
 - `dev` uses local build images and is intended for one compose file that starts both services.
 
+`prod` does not read the repository `.env` file. Export the required variables in the deployment shell or inject them from CI/secrets management before running compose. `dev` continues to use `.env`.
+
 `prod` start:
 
 ```bash
+export BOT_IMAGE_TAG=sha-<git-sha>
+export DOWNLOADER_IMAGE_TAG=sha-<git-sha>
+export TELEGRAM_BOT_TOKEN=...
+export CF_ACCOUNT_ID=...
+export CF_D1_DATABASE_ID=...
+export CF_QUEUE_ID=...
+export CF_STATUS_QUEUE_ID=...
+export CF_API_TOKEN=...
+
 docker compose -f deploy/docker-compose.bot.yml pull
 docker compose -f deploy/docker-compose.bot.yml up -d
 
