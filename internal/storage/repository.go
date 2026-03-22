@@ -21,6 +21,7 @@ type TaskRepository interface {
 	ListFailedForRetry(ctx context.Context, maxRetryCount int, limit int) ([]service.Task, error)
 	DeleteFailedByIdempotencyKey(ctx context.Context, idempotencyKey string) (int64, error)
 	DeletePendingByUserTaskID(ctx context.Context, userID int64, taskID string) (int64, error)
+	DeleteNonRunningByUserTaskID(ctx context.Context, userID int64, taskID string) (int64, error)
 	ListRecentByUser(ctx context.Context, userID int64, limit int) ([]service.Task, error)
 	ClaimForExecution(ctx context.Context, taskID, leaseID string, startedAt time.Time) (service.Task, bool, error)
 }
@@ -278,6 +279,26 @@ func (r *D1TaskRepository) DeletePendingByUserTaskID(ctx context.Context, userID
 	)
 	if err != nil {
 		return 0, fmt.Errorf("storage: delete pending task %q for user %d: %w", taskID, userID, err)
+	}
+	return result.Meta.Changes, nil
+}
+
+func (r *D1TaskRepository) DeleteNonRunningByUserTaskID(ctx context.Context, userID int64, taskID string) (int64, error) {
+	if r == nil || r.Client == nil {
+		return 0, errors.New("storage: nil d1 task repository")
+	}
+
+	result, err := r.Client.Query(ctx, `
+		DELETE FROM tasks
+		WHERE task_id = ?
+		  AND user_id = ?
+		  AND status <> ?`,
+		taskID,
+		userID,
+		string(service.StatusRunning),
+	)
+	if err != nil {
+		return 0, fmt.Errorf("storage: delete non-running task %q for user %d: %w", taskID, userID, err)
 	}
 	return result.Meta.Changes, nil
 }

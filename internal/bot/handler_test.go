@@ -14,18 +14,20 @@ import (
 )
 
 type fakeTaskQuery struct {
-	task              service.Task
-	tasks             []service.Task
-	activeTasks       []service.Task
-	err               error
-	createFn          func(service.CreateQueuedTaskRequest) (service.Task, error)
-	getTaskFn         func(string) (service.Task, error)
-	deleteFailedFn    func(string) (int64, error)
-	deletePendingFn   func(int64, string) (bool, error)
-	deletePendingResp bool
-	updateTaskCalls   int
-	lastUpdate        *service.TaskUpdate
-	updatedTaskID     string
+	task                 service.Task
+	tasks                []service.Task
+	activeTasks          []service.Task
+	err                  error
+	createFn             func(service.CreateQueuedTaskRequest) (service.Task, error)
+	getTaskFn            func(string) (service.Task, error)
+	deleteFailedFn       func(string) (int64, error)
+	deletePendingFn      func(int64, string) (bool, error)
+	deleteNonRunningFn   func(int64, string) (bool, error)
+	deletePendingResp    bool
+	deleteNonRunningResp bool
+	updateTaskCalls      int
+	lastUpdate           *service.TaskUpdate
+	updatedTaskID        string
 }
 
 type fakeQueue struct {
@@ -114,6 +116,16 @@ func (f *fakeTaskQuery) DeletePendingTask(_ context.Context, userID int64, taskI
 		return false, f.err
 	}
 	return f.deletePendingResp, nil
+}
+
+func (f *fakeTaskQuery) DeleteTaskNonRunning(_ context.Context, userID int64, taskID string) (bool, error) {
+	if f.deleteNonRunningFn != nil {
+		return f.deleteNonRunningFn(userID, taskID)
+	}
+	if f.err != nil {
+		return false, f.err
+	}
+	return f.deleteNonRunningResp, nil
 }
 
 func (f *fakeTaskQuery) ClaimTaskForExecution(context.Context, service.ClaimTaskExecutionRequest) (service.Task, bool, error) {
@@ -225,6 +237,73 @@ func TestHandlerDeleteCommandStatusChanged(t *testing.T) {
 	}
 	if !strings.Contains(reply, "状态已变化") {
 		t.Fatalf("unexpected delete reply: %s", reply)
+	}
+}
+
+func TestHandlerDeleteCommandForce(t *testing.T) {
+	tasks := &fakeTaskQuery{
+		task: service.Task{
+			TaskID: "task-a",
+			UserID: 1,
+			Status: service.StatusFailed,
+		},
+		deleteNonRunningResp: true,
+	}
+	h := Handler{Tasks: tasks}
+
+	reply, err := h.HandleText(context.Background(), 1, 1, "/delete task-a -f")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(reply, "任务已强制删除") {
+		t.Fatalf("unexpected force delete reply: %s", reply)
+	}
+}
+
+func TestHandlerDeleteCommandForceStatusChanged(t *testing.T) {
+	tasks := &fakeTaskQuery{
+		task: service.Task{
+			TaskID: "task-a",
+			UserID: 1,
+			Status: service.StatusDone,
+		},
+		deleteNonRunningResp: false,
+	}
+	h := Handler{Tasks: tasks}
+
+	reply, err := h.HandleText(context.Background(), 1, 1, "/delete --force task-a")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(reply, "状态已变化") {
+		t.Fatalf("unexpected force delete reply: %s", reply)
+	}
+}
+
+func TestHandlerDeleteCommandForceRejectsRunning(t *testing.T) {
+	deleteCalls := 0
+	tasks := &fakeTaskQuery{
+		task: service.Task{
+			TaskID: "task-a",
+			UserID: 1,
+			Status: service.StatusRunning,
+		},
+		deleteNonRunningFn: func(int64, string) (bool, error) {
+			deleteCalls++
+			return true, nil
+		},
+	}
+	h := Handler{Tasks: tasks}
+
+	reply, err := h.HandleText(context.Background(), 1, 1, "/delete task-a --force")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(reply, "无法强制删除") {
+		t.Fatalf("unexpected force delete running reply: %s", reply)
+	}
+	if deleteCalls != 0 {
+		t.Fatalf("expected no force delete call for running task, got %d", deleteCalls)
 	}
 }
 

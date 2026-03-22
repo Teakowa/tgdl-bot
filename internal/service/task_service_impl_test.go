@@ -8,25 +8,27 @@ import (
 )
 
 type fakeRepo struct {
-	byTaskID       map[string]Task
-	byIdempotency  map[string]Task
-	deleteRows     int64
-	createErr      error
-	updateErr      error
-	findByIDErr    error
-	findByIdemErr  error
-	deleteErr      error
-	deleteTaskRows int64
-	deleteTaskErr  error
-	listRecentResp []Task
-	listRecentErr  error
-	listActiveResp []Task
-	listActiveErr  error
-	listFailedResp []Task
-	listFailedErr  error
-	claimResp      Task
-	claimOK        bool
-	claimErr       error
+	byTaskID             map[string]Task
+	byIdempotency        map[string]Task
+	deleteRows           int64
+	createErr            error
+	updateErr            error
+	findByIDErr          error
+	findByIdemErr        error
+	deleteErr            error
+	deleteTaskRows       int64
+	deleteTaskErr        error
+	deleteNonRunningRows int64
+	deleteNonRunningErr  error
+	listRecentResp       []Task
+	listRecentErr        error
+	listActiveResp       []Task
+	listActiveErr        error
+	listFailedResp       []Task
+	listFailedErr        error
+	claimResp            Task
+	claimOK              bool
+	claimErr             error
 }
 
 func (r *fakeRepo) Create(_ context.Context, task Task) error {
@@ -116,6 +118,13 @@ func (r *fakeRepo) DeletePendingByUserTaskID(_ context.Context, _ int64, _ strin
 		return 0, r.deleteTaskErr
 	}
 	return r.deleteTaskRows, nil
+}
+
+func (r *fakeRepo) DeleteNonRunningByUserTaskID(_ context.Context, _ int64, _ string) (int64, error) {
+	if r.deleteNonRunningErr != nil {
+		return 0, r.deleteNonRunningErr
+	}
+	return r.deleteNonRunningRows, nil
 }
 
 func (r *fakeRepo) ClaimForExecution(_ context.Context, _ string, _ string, _ time.Time) (Task, bool, error) {
@@ -220,6 +229,28 @@ func TestDeletePendingTask(t *testing.T) {
 func TestDeletePendingTaskReturnsFalseWhenNoRows(t *testing.T) {
 	svc := NewTaskService(&fakeRepo{deleteTaskRows: 0})
 	deleted, err := svc.DeletePendingTask(context.Background(), 1, "t1")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if deleted {
+		t.Fatal("expected deleted=false")
+	}
+}
+
+func TestDeleteTaskNonRunning(t *testing.T) {
+	svc := NewTaskService(&fakeRepo{deleteNonRunningRows: 1})
+	deleted, err := svc.DeleteTaskNonRunning(context.Background(), 1, "t1")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !deleted {
+		t.Fatal("expected deleted=true")
+	}
+}
+
+func TestDeleteTaskNonRunningReturnsFalseWhenNoRows(t *testing.T) {
+	svc := NewTaskService(&fakeRepo{deleteNonRunningRows: 0})
+	deleted, err := svc.DeleteTaskNonRunning(context.Background(), 1, "t1")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

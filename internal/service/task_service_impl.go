@@ -19,6 +19,7 @@ type TaskRepository interface {
 	ListFailedForRetry(ctx context.Context, maxRetryCount int, limit int) ([]Task, error)
 	DeleteFailedByIdempotencyKey(ctx context.Context, idempotencyKey string) (int64, error)
 	DeletePendingByUserTaskID(ctx context.Context, userID int64, taskID string) (int64, error)
+	DeleteNonRunningByUserTaskID(ctx context.Context, userID int64, taskID string) (int64, error)
 	ListRecentByUser(ctx context.Context, userID int64, limit int) ([]Task, error)
 	ClaimForExecution(ctx context.Context, taskID, leaseID string, startedAt time.Time) (Task, bool, error)
 }
@@ -165,6 +166,24 @@ func (s taskService) DeletePendingTask(ctx context.Context, userID int64, taskID
 	rows, err := s.repo.DeletePendingByUserTaskID(ctx, userID, strings.TrimSpace(taskID))
 	if err != nil {
 		return false, fmt.Errorf("service: delete pending task: %w", err)
+	}
+	return rows > 0, nil
+}
+
+func (s taskService) DeleteTaskNonRunning(ctx context.Context, userID int64, taskID string) (bool, error) {
+	if s.repo == nil {
+		return false, errors.New("service: task repository is required")
+	}
+	if userID == 0 {
+		return false, errors.New("service: user id is required")
+	}
+	if strings.TrimSpace(taskID) == "" {
+		return false, errors.New("service: task id is required")
+	}
+
+	rows, err := s.repo.DeleteNonRunningByUserTaskID(ctx, userID, strings.TrimSpace(taskID))
+	if err != nil {
+		return false, fmt.Errorf("service: delete non-running task: %w", err)
 	}
 	return rows > 0, nil
 }

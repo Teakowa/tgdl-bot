@@ -96,6 +96,7 @@ type TaskService interface {
 	FindByIdempotencyKey(ctx context.Context, idempotencyKey string) (Task, error)
 	DeleteFailedByIdempotencyKey(ctx context.Context, idempotencyKey string) (int64, error)
 	DeletePendingTask(ctx context.Context, userID int64, taskID string) (bool, error)
+	DeleteTaskNonRunning(ctx context.Context, userID int64, taskID string) (bool, error)
 	ClaimTaskForExecution(ctx context.Context, req ClaimTaskExecutionRequest) (Task, bool, error)
 	UpdateTask(ctx context.Context, taskID string, update TaskUpdate) error
 }

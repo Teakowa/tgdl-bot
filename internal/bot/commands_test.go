@@ -13,6 +13,9 @@ func TestParseCommand(t *testing.T) {
 		{in: "/queue", want: ParsedCommand{Name: CommandQueue}},
 		{in: "/status abc-123", want: ParsedCommand{Name: CommandStatus, TaskID: "abc-123"}},
 		{in: "/delete abc-123", want: ParsedCommand{Name: CommandDelete, TaskID: "abc-123"}},
+		{in: "/delete abc-123 -f", want: ParsedCommand{Name: CommandDelete, TaskID: "abc-123", Force: true}},
+		{in: "/delete --force abc-123", want: ParsedCommand{Name: CommandDelete, TaskID: "abc-123", Force: true}},
+		{in: "/delete -f abc-123", want: ParsedCommand{Name: CommandDelete, TaskID: "abc-123", Force: true}},
 		{in: "/retry abc-123", want: ParsedCommand{Name: CommandRetry, TaskID: "abc-123"}},
 		{in: "https://t.me/c/1/2", want: ParsedCommand{Name: CommandUnknown}},
 	}
@@ -31,5 +34,8 @@ func TestBuildCommandReply(t *testing.T) {
 	}
 	if got := BuildCommandReply(ParsedCommand{Name: CommandStart}); got == "" {
 		t.Fatal("expected /start reply")
+	}
+	if got := BuildCommandReply(ParsedCommand{Name: CommandDelete}); got != "用法: /delete <task_id> [-f|--force]" {
+		t.Fatalf("unexpected delete usage: %s", got)
 	}
 }

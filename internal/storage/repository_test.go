@@ -241,3 +241,41 @@ func TestD1TaskRepositoryDeletePendingByUserTaskIDUsesPendingStatusFilter(t *tes
 		t.Fatalf("expected pending status filter in sql, got: %s", sqlValue)
 	}
 }
+
+func TestD1TaskRepositoryDeleteNonRunningByUserTaskIDUsesNonRunningStatusFilter(t *testing.T) {
+	var payload map[string]any
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer r.Body.Close()
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{
+			"success": true,
+			"result": [{"success": true, "results": [], "meta": {"changes": 1}}],
+			"errors": []
+		}`))
+	}))
+	defer server.Close()
+
+	client := NewD1Client("acc", "db", "token", time.Second)
+	client.baseURL = server.URL
+	repo := NewD1TaskRepository(client)
+
+	rows, err := repo.DeleteNonRunningByUserTaskID(context.Background(), 2, "task-1")
+	if err != nil {
+		t.Fatalf("delete non-running failed: %v", err)
+	}
+	if rows != 1 {
+		t.Fatalf("expected 1 deleted row, got %d", rows)
+	}
+
+	sqlValue, ok := payload["sql"].(string)
+	if !ok {
+		t.Fatalf("unexpected sql payload: %#v", payload["sql"])
+	}
+	if !strings.Contains(sqlValue, "status <>") {
+		t.Fatalf("expected non-running status filter in sql, got: %s", sqlValue)
+	}
+}

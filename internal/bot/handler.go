@@ -37,7 +37,7 @@ func BuildCommandReply(cmd ParsedCommand) string {
 			"/status <task_id>",
 			"/last",
 			"/queue",
-			"/delete <task_id>",
+			"/delete <task_id> [-f|--force]",
 			"/retry <task_id>",
 		}, "\n")
 	case CommandStatus:
@@ -50,7 +50,7 @@ func BuildCommandReply(cmd ParsedCommand) string {
 	case CommandQueue:
 		return "活跃任务查询已接收（running/queued/retrying）。"
 	case CommandDelete:
-		return "用法: /delete <task_id>"
+		return "用法: /delete <task_id> [-f|--force]"
 	case CommandRetry:
 		return "用法: /retry <task_id>"
 	default:
@@ -136,7 +136,7 @@ func (h Handler) HandleTextWithOutcome(ctx context.Context, userID, chatID int64
 		if cmd.TaskID == "" {
 			return HandleTextOutcome{Reply: BuildCommandReply(cmd)}, nil
 		}
-		return h.handleDeleteByTaskID(ctx, userID, cmd.TaskID)
+		return h.handleDeleteByTaskID(ctx, userID, cmd.TaskID, cmd.Force)
 	case CommandRetry:
 		if cmd.TaskID == "" {
 			return HandleTextOutcome{Reply: BuildCommandReply(cmd)}, nil
@@ -192,7 +192,7 @@ func (h Handler) HandleCallback(ctx context.Context, userID int64, callbackID, d
 		if taskID == "" {
 			return HandleCallbackOutcome{Reply: "无效任务 ID。", AnswerText: "参数错误"}, nil
 		}
-		outcome, err := h.handleDeleteByTaskID(ctx, userID, taskID)
+		outcome, err := h.handleDeleteByTaskID(ctx, userID, taskID, false)
 		if err != nil {
 			return HandleCallbackOutcome{}, err
 		}
@@ -271,13 +271,13 @@ func (h Handler) createTaskFromURL(ctx context.Context, userID, chatID int64, ur
 	}, nil
 }
 
-func (h Handler) handleDeleteByTaskID(ctx context.Context, userID int64, taskID string) (HandleTextOutcome, error) {
+func (h Handler) handleDeleteByTaskID(ctx context.Context, userID int64, taskID string, force bool) (HandleTextOutcome, error) {
 	if h.Tasks == nil {
 		return HandleTextOutcome{Reply: "任务删除暂未启用。"}, nil
 	}
 	taskID = strings.TrimSpace(taskID)
 	if taskID == "" {
-		return HandleTextOutcome{Reply: "用法: /delete <task_id>"}, nil
+		return HandleTextOutcome{Reply: "用法: /delete <task_id> [-f|--force]"}, nil
 	}
 
 	task, err := h.Tasks.GetTask(ctx, taskID)
@@ -290,9 +290,26 @@ func (h Handler) handleDeleteByTaskID(ctx context.Context, userID int64, taskID 
 	if task.UserID != userID {
 		return HandleTextOutcome{Reply: "无权限删除该任务。"}, nil
 	}
-	switch task.Status {
-	case service.StatusRunning:
+
+	if task.Status == service.StatusRunning {
+		if force {
+			return HandleTextOutcome{Reply: "任务正在执行中，无法强制删除。"}, nil
+		}
 		return HandleTextOutcome{Reply: "任务正在执行中，无法删除。"}, nil
+	}
+
+	if force {
+		deleted, err := h.Tasks.DeleteTaskNonRunning(ctx, userID, taskID)
+		if err != nil {
+			return HandleTextOutcome{}, err
+		}
+		if !deleted {
+			return HandleTextOutcome{Reply: "任务状态已变化，请刷新 /queue。"}, nil
+		}
+		return HandleTextOutcome{Reply: fmt.Sprintf("任务已强制删除\nTask ID: %s", taskID)}, nil
+	}
+
+	switch task.Status {
 	case service.StatusQueued, service.StatusRetrying:
 	default:
 		return HandleTextOutcome{Reply: "仅可删除 queued/retrying 任务。"}, nil
@@ -305,6 +322,7 @@ func (h Handler) handleDeleteByTaskID(ctx context.Context, userID int64, taskID 
 	if !deleted {
 		return HandleTextOutcome{Reply: "任务状态已变化，请刷新 /queue。"}, nil
 	}
+
 	return HandleTextOutcome{Reply: fmt.Sprintf("任务已删除\nTask ID: %s", taskID)}, nil
 }
 

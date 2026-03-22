@@ -18,6 +18,7 @@ const (
 type ParsedCommand struct {
 	Name   Command
 	TaskID string
+	Force  bool
 }
 
 func ParseCommand(text string) ParsedCommand {
@@ -48,9 +49,7 @@ func ParseCommand(text string) ParsedCommand {
 		return out
 	case string(CommandDelete):
 		out := ParsedCommand{Name: CommandDelete}
-		if len(fields) > 1 {
-			out.TaskID = fields[1]
-		}
+		out.TaskID, out.Force = parseDeleteArgs(fields[1:])
 		return out
 	case string(CommandRetry):
 		out := ParsedCommand{Name: CommandRetry}
@@ -61,4 +60,20 @@ func ParseCommand(text string) ParsedCommand {
 	default:
 		return ParsedCommand{Name: CommandUnknown}
 	}
+}
+
+func parseDeleteArgs(args []string) (string, bool) {
+	taskID := ""
+	force := false
+	for _, arg := range args {
+		switch arg {
+		case "-f", "--force":
+			force = true
+		default:
+			if taskID == "" {
+				taskID = arg
+			}
+		}
+	}
+	return taskID, force
 }
