@@ -48,8 +48,8 @@ func TestRun_PreflightFailureSkipsLoop(t *testing.T) {
 }
 
 type fakeQueue struct {
-	acked   []string
-	retried []string
+	acked    []string
+	retried  []string
 	enqueued []queue.Message
 }
 
@@ -381,6 +381,41 @@ func TestQueuePullLoopEmitsLifecycleLogs(t *testing.T) {
 	}
 }
 
+func TestQueuePullLoopEmitsTDLStreamLogs(t *testing.T) {
+	q := &fakeQueue{}
+	tasks := &fakeTasks{
+		task: service.Task{
+			TaskID:       "t-stream",
+			URL:          "https://t.me/c/1/2",
+			TargetChatID: 100,
+			Status:       service.StatusQueued,
+		},
+	}
+	capture := newLogCapture()
+	loop := queuePullLoop{
+		logger: capture.Logger(),
+		queue:  q,
+		tasks:  tasks,
+		runner: fakeRunnerImpl{build: func(ctx context.Context, _ dl.DownloadRequest) (*exec.Cmd, error) {
+			return exec.CommandContext(ctx, "sh", "-c", "printf 'out-line\\n'; printf 'err-line\\n' 1>&2"), nil
+		}},
+		maxAttempts: 3,
+	}
+
+	loop.processMessage(context.Background(), config.Config{Downloader: config.DownloaderConfig{TaskTimeoutMinutes: 1}}, queue.ReceivedMessage{
+		LeaseID: "lease-stream",
+		Body:    queue.Message{TaskID: "t-stream"},
+	})
+
+	records := capture.Records()
+	if !containsTDLStreamLog(records, slog.LevelInfo, "stdout", "out-line") {
+		t.Fatalf("expected stdout stream log, got %+v", records)
+	}
+	if !containsTDLStreamLog(records, slog.LevelWarn, "stderr", "err-line") {
+		t.Fatalf("expected stderr stream log, got %+v", records)
+	}
+}
+
 func TestQueuePullLoopLogsInvalidMessageAck(t *testing.T) {
 	q := &fakeQueue{}
 	capture := newLogCapture()
@@ -430,6 +465,17 @@ func (c *logCapture) Messages() []string {
 	return out
 }
 
+func (c *logCapture) Records() []slog.Record {
+	c.handler.mu.Lock()
+	defer c.handler.mu.Unlock()
+
+	out := make([]slog.Record, 0, len(c.handler.records))
+	for _, record := range c.handler.records {
+		out = append(out, record.Clone())
+	}
+	return out
+}
+
 type logCaptureHandler struct {
 	mu      sync.Mutex
 	records []slog.Record
@@ -452,4 +498,28 @@ func containsMessage(messages []string, want string) bool {
 		}
 	}
 	return false
+}
+
+func containsTDLStreamLog(records []slog.Record, level slog.Level, stream, line string) bool {
+	for _, record := range records {
+		if record.Message != "downloader tdl stream output" || record.Level != level {
+			continue
+		}
+		if recordAttrEquals(record, "stream", stream) && recordAttrEquals(record, "line", line) {
+			return true
+		}
+	}
+	return false
+}
+
+func recordAttrEquals(record slog.Record, key, want string) bool {
+	match := false
+	record.Attrs(func(attr slog.Attr) bool {
+		if attr.Key == key && attr.Value.String() == want {
+			match = true
+			return false
+		}
+		return true
+	})
+	return match
 }

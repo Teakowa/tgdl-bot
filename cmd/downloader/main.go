@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	neturl "net/url"
@@ -13,6 +14,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"tgdl-bot/internal/config"
@@ -403,11 +405,15 @@ func (l queuePullLoop) executeTask(ctx context.Context, cfg config.Config, task 
 	)
 
 	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
+	stdoutLogWriter := newTDLStreamLineWriter(l.logger, slog.LevelInfo, task.TaskID, "stdout")
+	stderrLogWriter := newTDLStreamLineWriter(l.logger, slog.LevelWarn, task.TaskID, "stderr")
+	cmd.Stdout = io.MultiWriter(&stdout, stdoutLogWriter)
+	cmd.Stderr = io.MultiWriter(&stderr, stderrLogWriter)
 
 	started := time.Now()
 	runErr := cmd.Run()
+	stdoutLogWriter.Flush()
+	stderrLogWriter.Flush()
 	result := dl.RunResult{
 		Command:  append([]string{cmd.Path}, cmd.Args[1:]...),
 		Stdout:   stdout.String(),
@@ -507,6 +513,72 @@ var nonRetryableCLIErrorKeywords = []string{
 
 func resultCommand(cmd *exec.Cmd) []string {
 	return append([]string{cmd.Path}, cmd.Args[1:]...)
+}
+
+type tdlStreamLineWriter struct {
+	logger *slog.Logger
+	level  slog.Level
+	taskID string
+	stream string
+
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func newTDLStreamLineWriter(logger *slog.Logger, level slog.Level, taskID, stream string) *tdlStreamLineWriter {
+	return &tdlStreamLineWriter{
+		logger: logger,
+		level:  level,
+		taskID: taskID,
+		stream: stream,
+	}
+}
+
+func (w *tdlStreamLineWriter) Write(p []byte) (int, error) {
+	if len(p) == 0 {
+		return 0, nil
+	}
+
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	written := len(p)
+	for len(p) > 0 {
+		index := bytes.IndexByte(p, '\n')
+		if index < 0 {
+			_, _ = w.buf.Write(p)
+			break
+		}
+
+		_, _ = w.buf.Write(p[:index])
+		w.emitLocked(w.buf.String())
+		w.buf.Reset()
+		p = p[index+1:]
+	}
+	return written, nil
+}
+
+func (w *tdlStreamLineWriter) Flush() {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	if w.buf.Len() == 0 {
+		return
+	}
+	w.emitLocked(w.buf.String())
+	w.buf.Reset()
+}
+
+func (w *tdlStreamLineWriter) emitLocked(line string) {
+	if w.logger == nil {
+		return
+	}
+
+	w.logger.Log(context.Background(), w.level, "downloader tdl stream output",
+		"task_id", w.taskID,
+		"stream", w.stream,
+		"line", strings.TrimSuffix(line, "\r"),
+	)
 }
 
 func sanitizeCommand(command []string) []string {
