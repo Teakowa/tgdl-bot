@@ -7,6 +7,9 @@
 docs
 *.md
 **/*.md
+deploy
+scripts
+migrations
 data
 tmp
 dist

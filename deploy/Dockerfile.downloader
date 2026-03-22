@@ -9,7 +9,8 @@ RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
     go mod download
 
-COPY . .
+COPY cmd/downloader ./cmd/downloader
+COPY internal ./internal
 
 ARG TARGETOS
 ARG TARGETARCH

@@ -17,20 +17,22 @@ permissions:
 
 jobs:
   publish:
+    name: publish-${{ matrix.job_name }}
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
         include:
-          - image_name: tgdl-bot
+          - job_name: bot
+            image_name: tgdl-bot
             dockerfile: deploy/Dockerfile.bot
             cache_scope: tgdl-bot-image
             build_args: ""
-          - image_name: tgdl-downloader
+          - job_name: downloader
+            image_name: tgdl-downloader
             dockerfile: deploy/Dockerfile.downloader
             cache_scope: tgdl-downloader-image
-            build_args: |
-              TDL_VERSION=v0.20.1
+            build_args: TDL_VERSION=v0.20.1
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -38,10 +40,6 @@ jobs:
       - name: Set image owner lowercase
         id: owner
         run: echo "value=${GITHUB_REPOSITORY_OWNER,,}" >> "${GITHUB_OUTPUT}"
-
-      - name: Set up QEMU
-        if: ${{ github.event_name != 'pull_request' }}
-        uses: docker/setup-qemu-action@v4
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
@@ -66,14 +64,14 @@ jobs:
             type=semver,pattern={{major}}.{{minor}}
             type=semver,pattern={{major}}
 
-      - name: Build and push image
+      - name: Build and push ${{ matrix.job_name }} image
         uses: docker/build-push-action@v7
         with:
           context: .
           file: ${{ matrix.dockerfile }}
           platforms: ${{ github.event_name == 'pull_request' && 'linux/amd64' || 'linux/amd64,linux/arm64' }}
           build-args: ${{ matrix.build_args }}
-          pull: true
+          pull: false
           push: ${{ github.event_name != 'pull_request' }}
           provenance: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.meta.outputs.tags }}
