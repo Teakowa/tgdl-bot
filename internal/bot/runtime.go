@@ -204,6 +204,15 @@ func (r Runtime) bindAndSyncTaskStatus(ctx context.Context, outcome *UpdateOutco
 		return
 	}
 
+	initialText := ""
+	if outcome.SendRequest != nil {
+		initialText = strings.TrimSpace(outcome.SendRequest.Text)
+	}
+	currentText := strings.TrimSpace(tasknotify.FormatTaskStatusMessage(task))
+	if initialText != "" && initialText == currentText {
+		return
+	}
+
 	notifier := tasknotify.Notifier{Client: r.Client, Logger: r.Logger}
 	if err := notifier.Notify(ctx, task); err != nil {
 		r.log("sync task status message failed", "task_id", task.TaskID, "error", err)

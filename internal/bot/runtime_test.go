@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"tgdl-bot/internal/service"
+	"tgdl-bot/internal/tasknotify"
 	"tgdl-bot/internal/telegram"
 )
 
@@ -192,6 +193,96 @@ func TestRuntimeBindsTaskMessageRefsForCreatedTask(t *testing.T) {
 	}
 	if tasks.lastUpdate == nil || tasks.lastUpdate.SourceMessageID == nil || *tasks.lastUpdate.SourceMessageID != 77 {
 		t.Fatalf("unexpected source message update: %+v", tasks.lastUpdate)
+	}
+}
+
+func TestRuntimeBindAndSyncTaskStatusSkipsNotifyWhenMessageUnchanged(t *testing.T) {
+	sourceID := int64(77)
+	statusID := int64(88)
+	task := service.Task{
+		TaskID:          "task-1",
+		ChatID:          101,
+		URL:             "https://t.me/c/1/2",
+		Status:          service.StatusQueued,
+		SourceMessageID: &sourceID,
+		StatusMessageID: &statusID,
+	}
+
+	client := &fakeTelegramClient{}
+	tasks := &fakeTaskQuery{task: task}
+	runtime := Runtime{
+		Client:  client,
+		Handler: Handler{Tasks: tasks},
+	}
+
+	outcome := &UpdateOutcome{
+		TaskID:          task.TaskID,
+		SourceMessageID: sourceID,
+		SendRequest: &telegram.SendMessageRequest{
+			ChatID: task.ChatID,
+			Text:   tasknotify.FormatTaskStatusMessage(task),
+		},
+	}
+
+	runtime.bindAndSyncTaskStatus(context.Background(), outcome, telegram.Message{MessageID: 999})
+
+	if tasks.updateTaskCalls != 1 {
+		t.Fatalf("expected task refs to be bound once, got %d", tasks.updateTaskCalls)
+	}
+	if tasks.lastUpdate == nil || tasks.lastUpdate.StatusMessageID == nil || *tasks.lastUpdate.StatusMessageID != 999 {
+		t.Fatalf("expected status message id to be updated, got %+v", tasks.lastUpdate)
+	}
+	if len(client.editedMessages) != 0 {
+		t.Fatalf("did not expect status edit for unchanged message, got %+v", client.editedMessages)
+	}
+	if client.setReactionCalled != 0 {
+		t.Fatalf("did not expect reaction update for unchanged message, got %d", client.setReactionCalled)
+	}
+}
+
+func TestRuntimeBindAndSyncTaskStatusNotifiesWhenMessageChanged(t *testing.T) {
+	sourceID := int64(77)
+	statusID := int64(88)
+	task := service.Task{
+		TaskID:          "task-1",
+		ChatID:          101,
+		URL:             "https://t.me/c/1/2",
+		Status:          service.StatusRunning,
+		SourceMessageID: &sourceID,
+		StatusMessageID: &statusID,
+	}
+
+	client := &fakeTelegramClient{}
+	tasks := &fakeTaskQuery{task: task}
+	runtime := Runtime{
+		Client:  client,
+		Handler: Handler{Tasks: tasks},
+	}
+
+	initialQueuedText := tasknotify.FormatTaskStatusMessage(service.Task{
+		TaskID: task.TaskID,
+		URL:    task.URL,
+		Status: service.StatusQueued,
+	})
+	outcome := &UpdateOutcome{
+		TaskID:          task.TaskID,
+		SourceMessageID: sourceID,
+		SendRequest: &telegram.SendMessageRequest{
+			ChatID: task.ChatID,
+			Text:   initialQueuedText,
+		},
+	}
+
+	runtime.bindAndSyncTaskStatus(context.Background(), outcome, telegram.Message{MessageID: 999})
+
+	if len(client.editedMessages) != 1 {
+		t.Fatalf("expected one status edit for changed message, got %+v", client.editedMessages)
+	}
+	if client.editedMessages[0].MessageID != statusID {
+		t.Fatalf("expected edit to target status message id %d, got %d", statusID, client.editedMessages[0].MessageID)
+	}
+	if client.setReactionCalled != 1 {
+		t.Fatalf("expected one reaction update for changed message, got %d", client.setReactionCalled)
 	}
 }
 
