@@ -412,6 +412,11 @@ func classifyTDLError(runCtx context.Context, result dl.RunResult, runErr error)
 		result.Stderr,
 		result.Stdout,
 	}, "\n"))
+	for _, kw := range nonRetryableCLIErrorKeywords {
+		if strings.Contains(text, kw) {
+			return dl.ErrorClassNonRetryable
+		}
+	}
 	for _, kw := range transientErrorKeywords {
 		if strings.Contains(text, kw) {
 			return dl.ErrorClassRetryable
@@ -432,6 +437,13 @@ var transientErrorKeywords = []string{
 	"transport is closing",
 	"tls handshake timeout",
 	"eof",
+}
+
+var nonRetryableCLIErrorKeywords = []string{
+	"unknown shorthand flag",
+	"unknown flag",
+	"usage:",
+	"flag needs an argument",
 }
 
 func resultCommand(cmd *exec.Cmd) []string {

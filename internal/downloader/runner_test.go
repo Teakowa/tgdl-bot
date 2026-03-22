@@ -19,9 +19,8 @@ func TestBuildForwardArgs(t *testing.T) {
 
 	want := []string{
 		"forward",
-		"-u", "https://t.me/c/123/456",
+		"--from", "https://t.me/c/123/456",
 		"--to", "999001",
-		"--message-id", "456",
 		"--reconnect-timeout", "10m",
 		"--namespace", "default",
 		"--storage", "/tmp/tdl-storage",

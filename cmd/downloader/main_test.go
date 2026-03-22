@@ -268,6 +268,15 @@ func TestClassifyTDLErrorTimeoutAndKeyword(t *testing.T) {
 			t.Fatalf("expected non_retryable, got %s", got)
 		}
 	})
+
+	t.Run("unknown flag error", func(t *testing.T) {
+		got := classifyTDLError(context.Background(), dl.RunResult{
+			Stderr: "Error: unknown shorthand flag: 'u' in -u\nUsage:\n  tdl forward [flags]",
+		}, errors.New("exit status 1"))
+		if got != dl.ErrorClassNonRetryable {
+			t.Fatalf("expected non_retryable, got %s", got)
+		}
+	})
 }
 
 func TestTransientKeywordsContainEOF(t *testing.T) {

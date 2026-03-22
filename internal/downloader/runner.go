@@ -111,13 +111,11 @@ func buildForwardArgs(req DownloadRequest) ([]string, error) {
 	if len(matches) != 2 || matches[1] == "" {
 		return nil, errors.New("downloader: unsupported telegram message URL")
 	}
-	messageID := matches[1]
 
 	args := []string{
 		"forward",
-		"-u", req.URL,
+		"--from", req.URL,
 		"--to", fmt.Sprintf("%d", req.TargetChatID),
-		"--message-id", messageID,
 		"--reconnect-timeout", defaultReconnectTimeout,
 	}
 
