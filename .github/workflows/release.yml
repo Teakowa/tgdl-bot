@@ -4,6 +4,10 @@ on:
   push:
     branches:
       - main
+    paths-ignore:
+      - README.md
+      - docs/**
+      - .env.example
 
 permissions:
   contents: write

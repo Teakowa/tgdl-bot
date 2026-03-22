@@ -6,9 +6,17 @@ on:
       - main
     tags:
       - "v*"
+    paths-ignore:
+      - README.md
+      - docs/**
+      - .env.example
   pull_request:
     branches:
       - main
+    paths-ignore:
+      - README.md
+      - docs/**
+      - .env.example
   workflow_dispatch:
 
 permissions:
