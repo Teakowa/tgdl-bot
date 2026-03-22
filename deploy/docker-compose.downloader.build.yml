@@ -1,8 +1,0 @@
-services:
-  downloader:
-    build:
-      context: ..
-      dockerfile: deploy/Dockerfile.downloader
-      args:
-        TDL_VERSION: v0.20.1
-    image: tgdl-downloader:local

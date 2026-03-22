@@ -1,6 +1,9 @@
 services:
   bot:
-    image: ghcr.io/teakowa/tgdl-bot:${BOT_IMAGE_TAG:-latest}
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.bot
+    image: tgdl-bot:local
     env_file:
       - ../.env
     environment:
@@ -10,7 +13,12 @@ services:
     restart: unless-stopped
 
   downloader:
-    image: ghcr.io/teakowa/tgdl-downloader:${DOWNLOADER_IMAGE_TAG:-latest}
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.downloader
+      args:
+        TDL_VERSION: v0.20.1
+    image: tgdl-downloader:local
     env_file:
       - ../.env
     environment:
@@ -21,3 +29,4 @@ services:
 
 volumes:
   tgdl-tdl-session:
+    name: tgdl-tdl-session

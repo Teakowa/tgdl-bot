@@ -72,21 +72,28 @@ On startup, downloader also re-enqueues historical failed/dead-lettered tasks th
 Use split compose by environment:
 
 - `prod` uses GHCR images and is intended for independent deployment (`bot` and `downloader` separately).
-- `dev` uses local build images and is intended for one compose command that starts both services.
+- `dev` uses local build images and is intended for one compose file that starts both services.
 
 `prod` start:
 
 ```bash
+docker compose -f deploy/docker-compose.bot.yml pull
 docker compose -f deploy/docker-compose.bot.yml up -d
+
+docker compose -f deploy/docker-compose.downloader.yml pull
 docker compose -f deploy/docker-compose.downloader.yml up -d
 ```
 
-`dev` start (short form with `COMPOSE_FILE`):
+`dev` start (single compose entrypoint):
 
 ```bash
-export COMPOSE_FILE=deploy/docker-compose.bot.yml:deploy/docker-compose.bot.build.yml:deploy/docker-compose.downloader.yml:deploy/docker-compose.downloader.build.yml
-docker compose build --pull
-docker compose up -d
+docker compose -f deploy/docker-compose.yml up -d --build
+```
+
+Compatibility build overlay (optional for legacy command patterns):
+
+```bash
+docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.build.yml up -d --build
 ```
 
 For full commands (`build`/`pull`/`up`), `tdl login` bootstrap, and scaling examples, see [docs/DEPLOY.md](docs/DEPLOY.md).

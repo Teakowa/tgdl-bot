@@ -5,8 +5,15 @@ Authoritative compose workflow by environment.
 ## Strategy
 
 - `prod`: use GHCR images and deploy `bot` / `downloader` independently.
-- `dev`: use local build images and start both services through one compose context.
+- `dev`: use local build images and start both services from one compose file.
 - This guide intentionally treats independent deployment as a production concern.
+
+## Compose entrypoints
+
+- `dev` combined: `deploy/docker-compose.yml`
+- `prod` bot: `deploy/docker-compose.bot.yml`
+- `prod` downloader: `deploy/docker-compose.downloader.yml`
+- compatibility build overlay: `deploy/docker-compose.build.yml` (optional)
 
 ## Common prerequisites
 
@@ -63,38 +70,39 @@ docker compose -f deploy/docker-compose.downloader.yml up -d
 docker compose -f deploy/docker-compose.downloader.yml up -d --scale downloader=3
 ```
 
-## dev workflow (one compose context for both services)
+## dev workflow (single compose entrypoint for both services)
 
-### 1. Set a short compose context
+### 1. Initialize downloader session (first time)
 
 ```bash
-export COMPOSE_FILE=deploy/docker-compose.bot.yml:deploy/docker-compose.bot.build.yml:deploy/docker-compose.downloader.yml:deploy/docker-compose.downloader.build.yml
+docker compose -f deploy/docker-compose.yml run --rm --build --entrypoint /usr/local/bin/tdl downloader login -T qr -n default
 ```
 
-### 2. Initialize downloader session in the same context (first time)
+### 2. Build and start both services
 
 ```bash
-docker compose run --rm --entrypoint /usr/local/bin/tdl downloader login -T qr -n default
+docker compose -f deploy/docker-compose.yml up -d --build
 ```
 
-### 3. Build and start both services
+### 3. Verify runtime
 
 ```bash
-docker compose build --pull
-docker compose up -d
+docker compose -f deploy/docker-compose.yml ps
+docker compose -f deploy/docker-compose.yml logs --tail=80 downloader
 ```
 
-### 4. Verify runtime
+### 4. Scale downloader (optional)
 
 ```bash
-docker compose ps
-docker compose logs --tail=80 downloader
+docker compose -f deploy/docker-compose.yml up -d --scale downloader=3
 ```
 
-### 5. Scale downloader (optional)
+## Compatibility build overlay
+
+For legacy command patterns that still append build overlay:
 
 ```bash
-docker compose up -d --scale downloader=3
+docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.build.yml up -d --build
 ```
 
 ## Compose wiring checks
@@ -102,9 +110,10 @@ docker compose up -d --scale downloader=3
 Expected service resolution:
 
 ```bash
+docker compose -f deploy/docker-compose.yml config --services
 docker compose -f deploy/docker-compose.bot.yml config --services
 docker compose -f deploy/docker-compose.downloader.yml config --services
-COMPOSE_FILE=deploy/docker-compose.bot.yml:deploy/docker-compose.bot.build.yml:deploy/docker-compose.downloader.yml:deploy/docker-compose.downloader.build.yml docker compose config --services
+docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.build.yml config --services
 ```
 
 ## Operational notes

@@ -1,6 +1,0 @@
-services:
-  bot:
-    build:
-      context: ..
-      dockerfile: deploy/Dockerfile.bot
-    image: tgdl-bot:local

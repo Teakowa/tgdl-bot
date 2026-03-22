@@ -11,3 +11,4 @@ services:
 
 volumes:
   tgdl-tdl-session:
+    name: tgdl-tdl-session
