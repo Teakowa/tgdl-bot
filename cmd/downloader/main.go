@@ -55,6 +55,7 @@ func (h startupPreflightHook) Check(ctx context.Context, cfg config.Config) erro
 		Namespace:     cfg.Downloader.Namespace,
 		Storage:       cfg.Downloader.Storage,
 		LoginRequired: cfg.Downloader.LoginRequired && cfg.Downloader.LoginCheckOnStart,
+		Workers:       cfg.Downloader.Workers,
 	})
 }
 

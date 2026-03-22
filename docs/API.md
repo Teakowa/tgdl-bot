@@ -27,6 +27,7 @@ Used by bot and downloader to read/write task state in a shared database.
 ### `tdl`
 
 Used by the downloader service to perform message forward work.
+Phase 1 supports only one active downloader per `TDL_NAMESPACE`/storage because `tdl` session storage is single-process.
 
 ## Internal data contracts
 
@@ -98,6 +99,7 @@ Used by the downloader service to perform message forward work.
 - Bot consumes status queue messages, fetches the latest task state from D1, and updates Telegram status/reaction.
 - Downloader performs session preflight before pulling tasks.
 - Downloader atomically claims task ownership (`queued`/`retrying` -> `running`) before execution.
+- Atomic task claim does not make `tdl` safe for multiple active processes sharing the same session/storage.
 - Downloader startup re-enqueues failed/dead-lettered tasks still below retry cap.
 - Downloader publishes status events to `CF_STATUS_QUEUE_ID` after each persisted state transition.
 - Downloader uses `exec.CommandContext` for `tdl`.

@@ -70,6 +70,7 @@ func TestLoadRequiresD1DatabaseID(t *testing.T) {
 func TestLoadForDownloaderDoesNotRequireTelegramToken(t *testing.T) {
 	setBaseEnv(t)
 	t.Setenv("TELEGRAM_BOT_TOKEN", "")
+	t.Setenv("DOWNLOADER_WORKERS", "1")
 
 	cfg, err := LoadForDownloader()
 	if err != nil {
@@ -77,6 +78,32 @@ func TestLoadForDownloaderDoesNotRequireTelegramToken(t *testing.T) {
 	}
 	if cfg.Telegram.BotToken != "" {
 		t.Fatalf("expected empty bot token, got %q", cfg.Telegram.BotToken)
+	}
+}
+
+func TestLoadForDownloaderAllowsSingleWorker(t *testing.T) {
+	setBaseEnv(t)
+	t.Setenv("DOWNLOADER_WORKERS", "1")
+
+	cfg, err := LoadForDownloader()
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if cfg.Downloader.Workers != 1 {
+		t.Fatalf("expected downloader workers to be 1, got %d", cfg.Downloader.Workers)
+	}
+}
+
+func TestLoadForDownloaderRejectsMultipleWorkers(t *testing.T) {
+	setBaseEnv(t)
+	t.Setenv("DOWNLOADER_WORKERS", "2")
+
+	_, err := LoadForDownloader()
+	if err == nil {
+		t.Fatal("expected validation error")
+	}
+	if !strings.Contains(err.Error(), "DOWNLOADER_WORKERS must be 1 in phase 1") {
+		t.Fatalf("expected downloader worker validation error, got %v", err)
 	}
 }
 
@@ -116,7 +143,7 @@ func setBaseEnv(t *testing.T) {
 	t.Setenv("TDL_STORAGE", "")
 	t.Setenv("TDL_LOGIN_REQUIRED", "true")
 	t.Setenv("TDL_LOGIN_CHECK_ON_START", "true")
-	t.Setenv("DOWNLOADER_WORKERS", "2")
+	t.Setenv("DOWNLOADER_WORKERS", "1")
 	t.Setenv("TASK_TIMEOUT_MINUTES", "180")
 	t.Setenv("LOG_LEVEL", "info")
 	t.Setenv("ENV", "test")

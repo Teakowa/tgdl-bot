@@ -67,6 +67,7 @@ The downloader performs a session preflight check before it begins consuming the
 The execution model is: `message URL -> queue -> tdl forward`.
 Downloader does not call Telegram Bot API directly.
 On startup, downloader also re-enqueues historical failed/dead-lettered tasks that are still below the retry cap.
+Phase 1 supports only one active downloader per `TDL_NAMESPACE`/storage because `tdl` session storage is single-process.
 
 ## Docker compose
 
@@ -108,7 +109,7 @@ Compatibility build overlay (optional for legacy command patterns):
 docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.build.yml up -d --build
 ```
 
-For full commands (`build`/`pull`/`up`), `tdl login` bootstrap, and scaling examples, see [docs/DEPLOY.md](docs/DEPLOY.md).
+For full commands (`build`/`pull`/`up`) and `tdl login` bootstrap, see [docs/DEPLOY.md](docs/DEPLOY.md).
 
 ## Deployment notes
 
@@ -119,6 +120,8 @@ For full commands (`build`/`pull`/`up`), `tdl login` bootstrap, and scaling exam
 - Downloader must not consume tasks until `tdl` session preflight succeeds.
 - Downloader writes task state to D1 and emits status events to `CF_STATUS_QUEUE_ID`.
 - Bot consumes `CF_STATUS_QUEUE_ID`, refreshes task state from D1, and updates Telegram status/reaction.
+- Atomic task claim only prevents duplicate queue ownership; it does not make `tdl` safe for multi-process access to the same session/storage.
+- Phase 1 allows only one active downloader replica per `TDL_NAMESPACE`/storage. Horizontal scale requires separate `tdl` sessions/storage plus explicit sharding, which is out of scope here.
 - Task execution timeout defaults to 3 hours (`TASK_TIMEOUT_MINUTES=180`); timeout tasks are marked failed and removed from queue.
 - This phase does not include a web UI, object storage, or worker-based deployment.
 - Bot accepts Telegram message URLs only and creates forward tasks.

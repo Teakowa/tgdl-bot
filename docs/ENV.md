@@ -30,7 +30,7 @@ All configuration is read from environment variables.
 - `TDL_STORAGE`: optional `tdl` storage value
 - `TDL_LOGIN_REQUIRED`: optional boolean, defaults to `true`
 - `TDL_LOGIN_CHECK_ON_START`: optional boolean, defaults to `true`
-- `DOWNLOADER_WORKERS`: optional worker count, defaults to `2`
+- `DOWNLOADER_WORKERS`: optional worker count, defaults to `1` and must remain `1` in phase 1 because `tdl` session storage is single-process
 - `TASK_TIMEOUT_MINUTES`: optional per-task timeout, defaults to `180` (3 hours, timeout tasks are marked failed and acked)
 
 ## Runtime
@@ -55,6 +55,7 @@ The phase 1 scaffold assumes:
 - D1 is the single task store for bot and downloader
 - `CF_QUEUE_ID` and `CF_STATUS_QUEUE_ID` are split by direction and cannot be shared
 - downloader publishes status events to `CF_STATUS_QUEUE_ID`; bot consumes and syncs Telegram status from D1
-- one `tdl` namespace per downloader deployment
+- one active downloader per `tdl` namespace/storage
+- atomic task claim prevents duplicate queue ownership, not multi-process `tdl` access
 - no interactive login at runtime
 - forward target defaults to sender context

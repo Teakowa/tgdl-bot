@@ -10,7 +10,7 @@ Phase 1 forwarding scope for TGDL Bot.
 - Dedicated status queue for downloader-to-bot task status synchronization
 - Basic idempotency and duplicate protection
 - Session preflight before downloader starts consuming tasks
-- Safe parallel downloader execution via atomic task claim
+- Single active downloader execution per `TDL_NAMESPACE`/storage
 
 ## Non-goals
 
@@ -20,6 +20,7 @@ Phase 1 forwarding scope for TGDL Bot.
 - Automatic Telegram re-upload
 - Complex permissions or multi-tenant behavior
 - Cross-machine queue sharding coordination beyond Cloudflare Queue + D1
+- Horizontal scaling of one `tdl` session/storage across multiple active downloader replicas
 
 ## Required services
 
@@ -92,6 +93,8 @@ Phase 1 forwarding scope for TGDL Bot.
 
 The downloader requires a pre-existing `tdl` login session.
 Run `tdl login` on each downloader host before starting downloader service on that host.
+Phase 1 allows only one active downloader process per `TDL_NAMESPACE`/storage because `tdl` session storage is single-process.
+Atomic task claim only protects queue ownership; it does not make `tdl` multi-process safe.
 
 ## Forwarding mode notes
 

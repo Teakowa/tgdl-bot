@@ -105,11 +105,11 @@ docker compose -f deploy/docker-compose.downloader.yml pull
 docker compose -f deploy/docker-compose.downloader.yml up -d
 ```
 
-### 5. Scale downloader (optional)
+### 5. Downloader replica policy
 
-```bash
-docker compose -f deploy/docker-compose.downloader.yml up -d --scale downloader=3
-```
+Run exactly one active downloader replica per `TDL_NAMESPACE`/storage.
+Do not use `--scale downloader=...` in phase 1: `tdl` session storage is single-process and concurrent replicas will fail with database lock errors.
+Horizontal scale requires separate `tdl` sessions/storage plus explicit sharding, which is out of scope here.
 
 ## dev workflow (single compose entrypoint for both services)
 
@@ -132,11 +132,10 @@ docker compose -f deploy/docker-compose.yml ps
 docker compose -f deploy/docker-compose.yml logs --tail=80 downloader
 ```
 
-### 4. Scale downloader (optional)
+### 4. Downloader replica policy
 
-```bash
-docker compose -f deploy/docker-compose.yml up -d --scale downloader=3
-```
+Run exactly one active downloader replica in dev as well.
+Do not use `--scale downloader=...` in phase 1.
 
 ## Compatibility build overlay
 
@@ -161,6 +160,7 @@ docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.build.yml c
 
 - Downloader performs startup preflight before queue consumption and requires a ready `tdl` session when login checks are enabled.
 - `tdl` session state is persisted in `tgdl-tdl-session` mounted at `/root/.tdl`.
+- Phase 1 supports one active downloader per `TDL_NAMESPACE`/storage only. Atomic task claim prevents duplicate queue ownership, but it does not make `tdl` multi-process safe.
 - Compose in this phase uses external Cloudflare Queue + D1 APIs; no local DB container is part of this deployment model.
 - Downloader does not need Telegram bot token; it publishes task status updates to `CF_STATUS_QUEUE_ID`.
 - Bot consumes `CF_STATUS_QUEUE_ID`, refreshes task state from D1, then syncs Telegram task status/reaction.

@@ -23,6 +23,7 @@ services:
       - ../.env
     environment:
       TDL_BIN: /usr/local/bin/tdl
+      DOWNLOADER_WORKERS: ${DOWNLOADER_WORKERS:-1}
     volumes:
       - tgdl-tdl-session:/root/.tdl
     restart: unless-stopped

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"os/exec"
+	"strings"
 	"testing"
 )
 
@@ -28,6 +29,7 @@ func TestStartupPreflightRequiresReadyWhenLoginRequired(t *testing.T) {
 		Binary:        "sh",
 		Namespace:     "default",
 		LoginRequired: true,
+		Workers:       1,
 	})
 	if err == nil {
 		t.Fatal("expected non-ready session to fail when login is required")
@@ -42,6 +44,7 @@ func TestStartupPreflightPassesWithReadySession(t *testing.T) {
 		Binary:        "sh",
 		Namespace:     "default",
 		LoginRequired: true,
+		Workers:       1,
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -56,8 +59,24 @@ func TestStartupPreflightPropagatesRunnerError(t *testing.T) {
 		Binary:        "sh",
 		Namespace:     "default",
 		LoginRequired: false,
+		Workers:       1,
 	})
 	if err == nil {
 		t.Fatal("expected runner error to be returned")
+	}
+}
+
+func TestStartupPreflightRejectsMultipleWorkers(t *testing.T) {
+	p := StartupPreflight{}
+	err := p.Check(context.Background(), StartupConfig{
+		Binary:    "sh",
+		Namespace: "default",
+		Workers:   2,
+	})
+	if err == nil {
+		t.Fatal("expected multiple workers to fail")
+	}
+	if !strings.Contains(err.Error(), "single-process") {
+		t.Fatalf("expected single-process lock explanation, got %v", err)
 	}
 }
