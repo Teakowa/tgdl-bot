@@ -21,12 +21,12 @@ type D1Client struct {
 }
 
 type D1QueryMeta struct {
-	ChangedDB bool  `json:"changed_db"`
-	Changes   int64 `json:"changes"`
-	Duration  int64 `json:"duration"`
-	LastRowID int64 `json:"last_row_id"`
-	RowsRead  int64 `json:"rows_read"`
-	RowsWrite int64 `json:"rows_written"`
+	ChangedDB bool    `json:"changed_db"`
+	Changes   int64   `json:"changes"`
+	Duration  float64 `json:"duration"`
+	LastRowID int64   `json:"last_row_id"`
+	RowsRead  int64   `json:"rows_read"`
+	RowsWrite int64   `json:"rows_written"`
 }
 
 type D1QueryResult struct {
