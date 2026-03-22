@@ -1,6 +1,9 @@
 package bot
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestParseCommand(t *testing.T) {
 	cases := []struct {
@@ -37,10 +40,22 @@ func TestBuildCommandReply(t *testing.T) {
 	if got := BuildCommandReply(ParsedCommand{Name: CommandStart}); got == "" {
 		t.Fatal("expected /start reply")
 	}
-	if got := BuildCommandReply(ParsedCommand{Name: CommandDelete}); got != "用法: /delete [task_id] [-f|--force]" {
-		t.Fatalf("unexpected delete usage: %s", got)
+	if got := BuildCommandReply(ParsedCommand{Name: CommandDelete}); !containsAll(got, "用法: /delete [task_id] [-f|--force]", "不带 task_id") {
+		t.Fatalf("unexpected delete help: %s", got)
+	}
+	if got := BuildCommandReply(ParsedCommand{Name: CommandRetry}); !containsAll(got, "用法: /retry [task_id]", "不带 task_id") {
+		t.Fatalf("unexpected retry help: %s", got)
 	}
 	if got := BuildCommandReply(ParsedCommand{Name: CommandForward}); got != "用法: /forward <source_url> <target> [--drop-caption]" {
 		t.Fatalf("unexpected forward usage: %s", got)
 	}
+}
+
+func containsAll(s string, parts ...string) bool {
+	for _, part := range parts {
+		if !strings.Contains(s, part) {
+			return false
+		}
+	}
+	return true
 }

@@ -282,7 +282,7 @@ func TestHandlerQueueCommand(t *testing.T) {
 
 func TestHandlerDeleteCommandWithoutTaskIDShowsQueueSelection(t *testing.T) {
 	h := Handler{
-		Tasks: &fakeTaskQuery{activeTasks: []service.Task{
+		Tasks: &fakeTaskQuery{queueTasks: []service.Task{
 			{TaskID: "task-a", Status: service.StatusRunning, URL: "https://t.me/c/1/2"},
 			{TaskID: "task-b", Status: service.StatusQueued, URL: "https://t.me/c/1/3"},
 		}},
@@ -292,7 +292,7 @@ func TestHandlerDeleteCommandWithoutTaskIDShowsQueueSelection(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if outcome.Reply != "请选择要操作的任务：" {
+	if outcome.Reply != "请选择要删除的任务：" {
 		t.Fatalf("unexpected delete selection reply: %s", outcome.Reply)
 	}
 	if outcome.ReplyMarkup == nil || len(outcome.ReplyMarkup.InlineKeyboard) != 2 {
@@ -302,7 +302,7 @@ func TestHandlerDeleteCommandWithoutTaskIDShowsQueueSelection(t *testing.T) {
 
 func TestHandlerDeleteCommandWithoutTaskIDShowsEmptyQueue(t *testing.T) {
 	h := Handler{
-		Tasks: &fakeTaskQuery{activeTasks: nil},
+		Tasks: &fakeTaskQuery{queueTasks: nil},
 	}
 
 	outcome, err := h.HandleTextWithOutcome(context.Background(), 1, 1, "/delete")
@@ -324,36 +324,40 @@ func TestHandlerDeleteCommand(t *testing.T) {
 			UserID: 1,
 			Status: service.StatusQueued,
 		},
-		deletePendingResp: true,
 	}
 	h := Handler{Tasks: tasks}
 
-	reply, err := h.HandleText(context.Background(), 1, 1, "/delete task-a")
+	outcome, err := h.HandleTextWithOutcome(context.Background(), 1, 1, "/delete task-a")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !strings.Contains(reply, "任务已删除") {
-		t.Fatalf("unexpected delete reply: %s", reply)
+	if !strings.Contains(outcome.Reply, "确认删除任务") {
+		t.Fatalf("unexpected delete reply: %s", outcome.Reply)
+	}
+	if outcome.ReplyMarkup == nil {
+		t.Fatalf("expected delete confirmation keyboard, got %+v", outcome.ReplyMarkup)
 	}
 }
 
-func TestHandlerDeleteCommandStatusChanged(t *testing.T) {
+func TestHandlerDeleteCommandShowsRunningTaskMenu(t *testing.T) {
 	tasks := &fakeTaskQuery{
 		task: service.Task{
 			TaskID: "task-a",
 			UserID: 1,
-			Status: service.StatusQueued,
+			Status: service.StatusRunning,
 		},
-		deletePendingResp: false,
 	}
 	h := Handler{Tasks: tasks}
 
-	reply, err := h.HandleText(context.Background(), 1, 1, "/delete task-a")
+	outcome, err := h.HandleTextWithOutcome(context.Background(), 1, 1, "/delete task-a")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !strings.Contains(reply, "状态已变化") {
-		t.Fatalf("unexpected delete reply: %s", reply)
+	if !strings.Contains(outcome.Reply, "可强制删除记录") {
+		t.Fatalf("unexpected running delete reply: %s", outcome.Reply)
+	}
+	if outcome.ReplyMarkup == nil || outcome.ReplyMarkup.InlineKeyboard[0][0].Text != "强制删除" {
+		t.Fatalf("expected running delete menu, got %+v", outcome.ReplyMarkup)
 	}
 }
 
@@ -364,63 +368,59 @@ func TestHandlerDeleteCommandForce(t *testing.T) {
 			UserID: 1,
 			Status: service.StatusFailed,
 		},
-		forceDeleteResp: true,
 	}
 	h := Handler{Tasks: tasks}
 
-	reply, err := h.HandleText(context.Background(), 1, 1, "/delete task-a -f")
+	outcome, err := h.HandleTextWithOutcome(context.Background(), 1, 1, "/delete task-a -f")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !strings.Contains(reply, "任务已强制删除") {
-		t.Fatalf("unexpected force delete reply: %s", reply)
+	if !strings.Contains(outcome.Reply, "确认强制删除任务") {
+		t.Fatalf("unexpected force delete reply: %s", outcome.Reply)
+	}
+	if outcome.ReplyMarkup == nil {
+		t.Fatalf("expected force delete confirmation keyboard, got %+v", outcome.ReplyMarkup)
 	}
 }
 
-func TestHandlerDeleteCommandForceStatusChanged(t *testing.T) {
+func TestHandlerDeleteCommandUnsupportedStatus(t *testing.T) {
 	tasks := &fakeTaskQuery{
 		task: service.Task{
 			TaskID: "task-a",
 			UserID: 1,
 			Status: service.StatusDone,
 		},
-		forceDeleteResp: false,
 	}
 	h := Handler{Tasks: tasks}
 
-	reply, err := h.HandleText(context.Background(), 1, 1, "/delete --force task-a")
+	reply, err := h.HandleText(context.Background(), 1, 1, "/delete task-a")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !strings.Contains(reply, "状态已变化") {
-		t.Fatalf("unexpected force delete reply: %s", reply)
+	if !strings.Contains(reply, "当前状态不支持删除") {
+		t.Fatalf("unexpected delete reply: %s", reply)
 	}
 }
 
 func TestHandlerDeleteCommandForceAllowsRunning(t *testing.T) {
-	deleteCalls := 0
 	tasks := &fakeTaskQuery{
 		task: service.Task{
 			TaskID: "task-a",
 			UserID: 1,
 			Status: service.StatusRunning,
 		},
-		forceDeleteFn: func(int64, string) (bool, error) {
-			deleteCalls++
-			return true, nil
-		},
 	}
 	h := Handler{Tasks: tasks}
 
-	reply, err := h.HandleText(context.Background(), 1, 1, "/delete task-a --force")
+	outcome, err := h.HandleTextWithOutcome(context.Background(), 1, 1, "/delete task-a --force")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !strings.Contains(reply, "仅删除记录，不终止当前执行") {
-		t.Fatalf("unexpected force delete running reply: %s", reply)
+	if !strings.Contains(outcome.Reply, "确认强制删除任务") || !strings.Contains(outcome.Reply, "这只会删除记录，不会终止当前执行") {
+		t.Fatalf("unexpected force delete running reply: %s", outcome.Reply)
 	}
-	if deleteCalls != 1 {
-		t.Fatalf("expected one force delete call for running task, got %d", deleteCalls)
+	if outcome.ReplyMarkup == nil {
+		t.Fatalf("expected force delete confirmation keyboard, got %+v", outcome.ReplyMarkup)
 	}
 }
 
@@ -703,18 +703,21 @@ func TestHandlerRetryCommandRebuildsAndEnqueues(t *testing.T) {
 	}
 
 	h := Handler{Tasks: tasks, Queue: q}
-	reply, err := h.HandleText(context.Background(), 1, 1, "/retry failed-task")
+	outcome, err := h.HandleTextWithOutcome(context.Background(), 1, 1, "/retry failed-task")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !strings.Contains(reply, "任务已入队") {
-		t.Fatalf("unexpected retry reply: %s", reply)
+	if !strings.Contains(outcome.Reply, "失败") && !strings.Contains(outcome.Reply, "Task ID: failed-task") {
+		t.Fatalf("unexpected retry reply: %s", outcome.Reply)
 	}
-	if deleteCalls != 1 {
-		t.Fatalf("expected one cleanup delete, got %d", deleteCalls)
+	if outcome.ReplyMarkup == nil {
+		t.Fatalf("expected retry task action keyboard, got %+v", outcome.ReplyMarkup)
 	}
-	if len(q.messages) != 1 {
-		t.Fatalf("expected one enqueue, got %d", len(q.messages))
+	if deleteCalls != 0 {
+		t.Fatalf("expected no cleanup delete before callback retry, got %d", deleteCalls)
+	}
+	if len(q.messages) != 0 {
+		t.Fatalf("expected no enqueue before callback retry, got %d", len(q.messages))
 	}
 }
 
@@ -738,6 +741,48 @@ func TestHandlerRetryCommandRejectsNonFailedStatus(t *testing.T) {
 	}
 }
 
+func TestHandlerRetryCommandWithoutTaskIDShowsRetrySelection(t *testing.T) {
+	h := Handler{
+		Tasks: &fakeTaskQuery{queueTasks: []service.Task{
+			{TaskID: "task-a", Status: service.StatusFailed, URL: "https://t.me/c/1/2"},
+			{TaskID: "task-b", Status: service.StatusQueued, URL: "https://t.me/c/1/3"},
+			{TaskID: "task-c", Status: service.StatusDeadLettered, URL: "https://t.me/c/1/4"},
+		}},
+		Queue: &fakeQueue{},
+	}
+
+	outcome, err := h.HandleTextWithOutcome(context.Background(), 1, 1, "/retry")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if outcome.Reply != "请选择要重试的任务：" {
+		t.Fatalf("unexpected retry selection reply: %s", outcome.Reply)
+	}
+	if outcome.ReplyMarkup == nil || len(outcome.ReplyMarkup.InlineKeyboard) != 2 {
+		t.Fatalf("expected retry selection keyboard, got %+v", outcome.ReplyMarkup)
+	}
+}
+
+func TestHandlerRetryCommandWithoutTaskIDShowsEmptyState(t *testing.T) {
+	h := Handler{
+		Tasks: &fakeTaskQuery{queueTasks: []service.Task{
+			{TaskID: "task-a", Status: service.StatusQueued, URL: "https://t.me/c/1/2"},
+		}},
+		Queue: &fakeQueue{},
+	}
+
+	outcome, err := h.HandleTextWithOutcome(context.Background(), 1, 1, "/retry")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if outcome.Reply != "当前无可重试任务。" {
+		t.Fatalf("unexpected retry empty reply: %s", outcome.Reply)
+	}
+	if outcome.ReplyMarkup != nil {
+		t.Fatalf("expected no keyboard for empty retry list, got %+v", outcome.ReplyMarkup)
+	}
+}
+
 func TestHandleCallbackDeleteFlow(t *testing.T) {
 	const taskID = "task-123456"
 	tasks := &fakeTaskQuery{
@@ -752,7 +797,7 @@ func TestHandleCallbackDeleteFlow(t *testing.T) {
 	}
 	h := Handler{Tasks: tasks}
 
-	prompt, err := h.HandleCallback(context.Background(), 1, "cb-1", callbackDeletePrefix+taskID)
+	prompt, err := h.HandleCallback(context.Background(), 1, "cb-1", callbackDeletePrefix+encodeModeTask(taskMenuModeQueue, taskID))
 	if err != nil {
 		t.Fatalf("unexpected prompt error: %v", err)
 	}
@@ -760,7 +805,7 @@ func TestHandleCallbackDeleteFlow(t *testing.T) {
 		t.Fatalf("expected delete confirmation keyboard, got %+v", prompt.ReplyMarkup)
 	}
 
-	confirmed, err := h.HandleCallback(context.Background(), 1, "cb-1", callbackDeleteOKPrefix+taskID)
+	confirmed, err := h.HandleCallback(context.Background(), 1, "cb-1", callbackDeleteOKPrefix+encodeModeTask(taskMenuModeQueue, taskID))
 	if err != nil {
 		t.Fatalf("unexpected confirm error: %v", err)
 	}
@@ -786,7 +831,7 @@ func TestHandleCallbackQueueTaskMenuShowsStatusSpecificActions(t *testing.T) {
 		},
 	}}
 
-	outcome, err := h.HandleCallback(context.Background(), 1, "cb-1", callbackQueueTaskPrefix+taskID)
+	outcome, err := h.HandleCallback(context.Background(), 1, "cb-1", callbackQueueTaskPrefix+encodeModeTask(taskMenuModeQueue, taskID))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -821,7 +866,7 @@ func TestHandleCallbackQueuePauseFlow(t *testing.T) {
 	}
 
 	h := Handler{Tasks: tasks}
-	outcome, err := h.HandleCallback(context.Background(), 1, "cb-1", callbackQueuePausePrefix+taskID)
+	outcome, err := h.HandleCallback(context.Background(), 1, "cb-1", callbackQueuePausePrefix+encodeModeTask(taskMenuModeQueue, taskID))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -841,7 +886,7 @@ func TestHandleCallbackQueueCancelRefreshesList(t *testing.T) {
 	}
 
 	h := Handler{Tasks: tasks}
-	outcome, err := h.HandleCallback(context.Background(), 1, "cb-1", callbackQueueCancelPrefix+taskID)
+	outcome, err := h.HandleCallback(context.Background(), 1, "cb-1", callbackQueueCancelPrefix+encodeModeTask(taskMenuModeQueue, taskID))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -864,7 +909,7 @@ func TestHandleCallbackQueueRunningTaskShowsNoMutationActions(t *testing.T) {
 		},
 	}}
 
-	outcome, err := h.HandleCallback(context.Background(), 1, "cb-1", callbackQueueTaskPrefix+taskID)
+	outcome, err := h.HandleCallback(context.Background(), 1, "cb-1", callbackQueueTaskPrefix+encodeModeTask(taskMenuModeQueue, taskID))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -876,7 +921,31 @@ func TestHandleCallbackQueueRunningTaskShowsNoMutationActions(t *testing.T) {
 	}
 }
 
-func TestHandleCallbackQueueForceDeleteRunning(t *testing.T) {
+func TestHandleCallbackQueueForceDeleteRunningShowsConfirmation(t *testing.T) {
+	const taskID = "task-123456"
+	tasks := &fakeTaskQuery{
+		task: service.Task{
+			TaskID: taskID,
+			UserID: 1,
+			URL:    "https://t.me/c/1/2",
+			Status: service.StatusRunning,
+		},
+	}
+
+	h := Handler{Tasks: tasks}
+	outcome, err := h.HandleCallback(context.Background(), 1, "cb-1", callbackQueueForcePrefix+encodeModeTask(taskMenuModeQueue, taskID))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(outcome.Reply, "确认强制删除任务") {
+		t.Fatalf("unexpected force delete callback reply: %s", outcome.Reply)
+	}
+	if outcome.AnswerText != "请确认强制删除" {
+		t.Fatalf("unexpected force delete callback answer: %s", outcome.AnswerText)
+	}
+}
+
+func TestHandleCallbackQueueForceDeleteConfirmRunning(t *testing.T) {
 	const taskID = "task-123456"
 	tasks := &fakeTaskQuery{
 		task: service.Task{
@@ -890,7 +959,7 @@ func TestHandleCallbackQueueForceDeleteRunning(t *testing.T) {
 	}
 
 	h := Handler{Tasks: tasks}
-	outcome, err := h.HandleCallback(context.Background(), 1, "cb-1", callbackQueueForcePrefix+taskID)
+	outcome, err := h.HandleCallback(context.Background(), 1, "cb-1", callbackQueueForceOKPrefix+encodeModeTask(taskMenuModeQueue, taskID))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -899,6 +968,49 @@ func TestHandleCallbackQueueForceDeleteRunning(t *testing.T) {
 	}
 	if outcome.AnswerText != "已强制删除" {
 		t.Fatalf("unexpected force delete callback answer: %s", outcome.AnswerText)
+	}
+}
+
+func TestHandleCallbackRetryFromRetryListRebuildsAndRefreshes(t *testing.T) {
+	const taskID = "task-123456"
+	q := &fakeQueue{}
+	tasks := &fakeTaskQuery{
+		task: service.Task{
+			TaskID:         taskID,
+			ChatID:         1,
+			UserID:         1,
+			URL:            "https://t.me/c/1/2",
+			Status:         service.StatusFailed,
+			IdempotencyKey: "idem-key",
+		},
+		queueTasks: []service.Task{{TaskID: "other-failed", UserID: 1, Status: service.StatusDeadLettered, URL: "https://t.me/c/1/3"}},
+	}
+	tasks.createFn = func(req service.CreateQueuedTaskRequest) (service.Task, error) {
+		return service.Task{
+			TaskID:         req.TaskID,
+			ChatID:         req.ChatID,
+			UserID:         req.UserID,
+			URL:            req.URL,
+			Status:         service.StatusQueued,
+			CreatedAt:      time.Now().UTC(),
+			IdempotencyKey: req.IdempotencyKey,
+		}, nil
+	}
+	tasks.deleteFailedFn = func(string) (int64, error) { return 1, nil }
+
+	h := Handler{Tasks: tasks, Queue: q}
+	outcome, err := h.HandleCallback(context.Background(), 1, "cb-1", callbackQueueRetryPrefix+encodeModeTask(taskMenuModeRetry, taskID))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(outcome.Reply, "任务已入队") {
+		t.Fatalf("unexpected retry callback reply: %s", outcome.Reply)
+	}
+	if outcome.ReplyMarkup == nil || len(outcome.ReplyMarkup.InlineKeyboard) != 1 {
+		t.Fatalf("expected refreshed retry keyboard, got %+v", outcome.ReplyMarkup)
+	}
+	if len(q.messages) != 1 {
+		t.Fatalf("expected one enqueue after retry callback, got %d", len(q.messages))
 	}
 }
 
