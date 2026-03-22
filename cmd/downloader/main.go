@@ -425,7 +425,27 @@ func (l queuePullLoop) notifyFinalTaskStatus(ctx context.Context, fallbackTask s
 		l.notifyTaskStatus(ctx, fallbackTask)
 		return
 	}
-	l.notifyTaskStatus(ctx, freshTask)
+
+	if freshTask.Status != fallbackTask.Status {
+		l.logger.Warn("downloader refreshed task status mismatch",
+			"task_id", fallbackTask.TaskID,
+			"fallback_status", fallbackTask.Status,
+			"fresh_status", freshTask.Status,
+		)
+	}
+
+	notifyTask := fallbackTask
+	if notifyTask.ChatID == 0 && freshTask.ChatID != 0 {
+		notifyTask.ChatID = freshTask.ChatID
+	}
+	if freshTask.SourceMessageID != nil {
+		notifyTask.SourceMessageID = freshTask.SourceMessageID
+	}
+	if freshTask.StatusMessageID != nil {
+		notifyTask.StatusMessageID = freshTask.StatusMessageID
+	}
+
+	l.notifyTaskStatus(ctx, notifyTask)
 }
 
 func (l queuePullLoop) executeTask(ctx context.Context, cfg config.Config, task service.Task) (dl.RunResult, dl.ErrorClass, error) {

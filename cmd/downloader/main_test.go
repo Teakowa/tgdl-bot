@@ -214,10 +214,14 @@ func TestQueuePullLoopProcessMessageSuccessRefreshesTaskBeforeFinalNotify(t *tes
 		},
 	}
 	tasks.getTaskFn = func(_ string) (service.Task, error) {
-		refreshed := tasks.task
-		refreshed.SourceMessageID = &sourceMessageID
-		refreshed.StatusMessageID = &statusMessageID
-		return refreshed, nil
+		return service.Task{
+			TaskID:          tasks.task.TaskID,
+			ChatID:          tasks.task.ChatID,
+			URL:             tasks.task.URL,
+			Status:          service.StatusRunning,
+			SourceMessageID: &sourceMessageID,
+			StatusMessageID: &statusMessageID,
+		}, nil
 	}
 
 	loop := queuePullLoop{
@@ -245,6 +249,9 @@ func TestQueuePullLoopProcessMessageSuccessRefreshesTaskBeforeFinalNotify(t *tes
 	}
 	if finalTask.SourceMessageID == nil || *finalTask.SourceMessageID != sourceMessageID {
 		t.Fatalf("expected refreshed source message id, got %+v", finalTask.SourceMessageID)
+	}
+	if finalTask.StatusMessageID == nil || *finalTask.StatusMessageID != statusMessageID {
+		t.Fatalf("expected refreshed status message id, got %+v", finalTask.StatusMessageID)
 	}
 }
 

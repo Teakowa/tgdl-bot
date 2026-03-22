@@ -83,6 +83,32 @@ func TestNotifierNotifyReturnsJoinedError(t *testing.T) {
 	}
 }
 
+func TestNotifierNotifySourceReactionUsesDoneEmoji(t *testing.T) {
+	sourceID := int64(10)
+	client := &fakeClient{}
+	notifier := Notifier{Client: client}
+	task := service.Task{
+		TaskID:          "t1",
+		ChatID:          100,
+		URL:             "https://t.me/c/1/2",
+		Status:          service.StatusDone,
+		SourceMessageID: &sourceID,
+	}
+
+	if err := notifier.Notify(context.Background(), task); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if client.editReq != nil {
+		t.Fatalf("did not expect status message edit, got %+v", client.editReq)
+	}
+	if client.reactionReq == nil || client.reactionReq.MessageID != sourceID {
+		t.Fatalf("expected source reaction update, got %+v", client.reactionReq)
+	}
+	if got := client.reactionReq.Reaction[0].Emoji; got != "✅" {
+		t.Fatalf("expected done emoji, got %q", got)
+	}
+}
+
 func TestFormatTaskStatusMessageIncludesErrorAndTimes(t *testing.T) {
 	started := time.Date(2026, 3, 22, 4, 0, 0, 0, time.UTC)
 	finished := started.Add(2 * time.Minute)
