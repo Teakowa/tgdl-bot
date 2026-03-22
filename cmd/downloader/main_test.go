@@ -71,6 +71,8 @@ type fakeTasks struct {
 	task           service.Task
 	claimed        bool
 	claimErr       error
+	getTaskErr     error
+	getTaskFn      func(taskID string) (service.Task, error)
 	updates        []service.TaskUpdate
 	failedForRetry []service.Task
 }
@@ -86,10 +88,51 @@ func (f *fakeTasks) ClaimTaskForExecution(_ context.Context, _ service.ClaimTask
 }
 func (f *fakeTasks) UpdateTask(_ context.Context, _ string, update service.TaskUpdate) error {
 	f.updates = append(f.updates, update)
+	if update.Status != "" {
+		f.task.Status = update.Status
+	}
+	if update.RetryCount != nil {
+		f.task.RetryCount = *update.RetryCount
+	}
+	if update.LeaseID != nil {
+		f.task.LeaseID = update.LeaseID
+	}
+	if update.OutputSummary != nil {
+		f.task.OutputSummary = update.OutputSummary
+	}
+	if update.ErrorMessage != nil {
+		f.task.ErrorMessage = update.ErrorMessage
+	}
+	if update.ExitCode != nil {
+		f.task.ExitCode = update.ExitCode
+	}
+	if update.StartedAt != nil {
+		t := update.StartedAt.UTC()
+		f.task.StartedAt = &t
+	}
+	if update.FinishedAt != nil {
+		t := update.FinishedAt.UTC()
+		f.task.FinishedAt = &t
+	}
+	if update.SourceMessageID != nil {
+		f.task.SourceMessageID = update.SourceMessageID
+	}
+	if update.StatusMessageID != nil {
+		f.task.StatusMessageID = update.StatusMessageID
+	}
 	return nil
 }
 func (f *fakeTasks) ListFailedTasksForRetry(context.Context, int, int) ([]service.Task, error) {
 	return f.failedForRetry, nil
+}
+func (f *fakeTasks) GetTask(_ context.Context, taskID string) (service.Task, error) {
+	if f.getTaskFn != nil {
+		return f.getTaskFn(taskID)
+	}
+	if f.getTaskErr != nil {
+		return service.Task{}, f.getTaskErr
+	}
+	return f.task, nil
 }
 
 type fakeRunnerImpl struct {
@@ -153,6 +196,55 @@ func TestQueuePullLoopProcessMessageSuccessAcks(t *testing.T) {
 	}
 	if notifier.tasks[len(notifier.tasks)-1].Status != service.StatusDone {
 		t.Fatalf("expected done notification, got %s", notifier.tasks[len(notifier.tasks)-1].Status)
+	}
+}
+
+func TestQueuePullLoopProcessMessageSuccessRefreshesTaskBeforeFinalNotify(t *testing.T) {
+	q := &fakeQueue{}
+	notifier := &fakeNotifier{}
+	sourceMessageID := int64(77)
+	statusMessageID := int64(88)
+	tasks := &fakeTasks{
+		claimed: true,
+		task: service.Task{
+			TaskID:       "t1",
+			URL:          "https://t.me/c/1/2",
+			TargetChatID: 100,
+			Status:       service.StatusQueued,
+		},
+	}
+	tasks.getTaskFn = func(_ string) (service.Task, error) {
+		refreshed := tasks.task
+		refreshed.SourceMessageID = &sourceMessageID
+		refreshed.StatusMessageID = &statusMessageID
+		return refreshed, nil
+	}
+
+	loop := queuePullLoop{
+		logger: slog.Default(),
+		queue:  q,
+		tasks:  tasks,
+		runner: fakeRunnerImpl{build: func(ctx context.Context, _ dl.DownloadRequest) (*exec.Cmd, error) {
+			return exec.CommandContext(ctx, "sh", "-c", "echo ok"), nil
+		}},
+		notifier:    notifier,
+		maxAttempts: 3,
+	}
+
+	loop.processMessage(context.Background(), config.Config{Downloader: config.DownloaderConfig{TaskTimeoutMinutes: 1}}, queue.ReceivedMessage{
+		LeaseID: "lease-1",
+		Body:    queue.Message{TaskID: "t1"},
+	})
+
+	if len(notifier.tasks) < 2 {
+		t.Fatalf("expected running and done notifications, got %d", len(notifier.tasks))
+	}
+	finalTask := notifier.tasks[len(notifier.tasks)-1]
+	if finalTask.Status != service.StatusDone {
+		t.Fatalf("expected done notification, got %s", finalTask.Status)
+	}
+	if finalTask.SourceMessageID == nil || *finalTask.SourceMessageID != sourceMessageID {
+		t.Fatalf("expected refreshed source message id, got %+v", finalTask.SourceMessageID)
 	}
 }
 

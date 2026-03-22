@@ -70,6 +70,7 @@ type taskService interface {
 	UpdateTask(ctx context.Context, taskID string, update service.TaskUpdate) error
 	ListFailedTasksForRetry(ctx context.Context, maxRetryCount int, limit int) ([]service.Task, error)
 	ClaimTaskForExecution(ctx context.Context, req service.ClaimTaskExecutionRequest) (service.Task, bool, error)
+	GetTask(ctx context.Context, taskID string) (service.Task, error)
 }
 
 type taskStatusNotifier interface {
@@ -316,7 +317,7 @@ func (l queuePullLoop) processMessage(ctx context.Context, cfg config.Config, me
 		task.OutputSummary = &out
 		task.FinishedAt = &finishedAt
 		task.ErrorMessage = nil
-		l.notifyTaskStatus(ctx, task)
+		l.notifyFinalTaskStatus(ctx, task)
 		l.logger.Info("downloader queue action",
 			"task_id", task.TaskID,
 			"lease_id", message.LeaseID,
@@ -371,7 +372,7 @@ func (l queuePullLoop) processMessage(ctx context.Context, cfg config.Config, me
 		exitCode := result.ExitCode
 		task.ExitCode = &exitCode
 	}
-	l.notifyTaskStatus(ctx, task)
+	l.notifyFinalTaskStatus(ctx, task)
 
 	if shouldRetry {
 		l.logger.Info("downloader queue action",
@@ -406,6 +407,25 @@ func (l queuePullLoop) notifyTaskStatus(ctx context.Context, task service.Task) 
 			"error", err,
 		)
 	}
+}
+
+func (l queuePullLoop) notifyFinalTaskStatus(ctx context.Context, fallbackTask service.Task) {
+	if l.tasks == nil {
+		l.notifyTaskStatus(ctx, fallbackTask)
+		return
+	}
+
+	freshTask, err := l.tasks.GetTask(ctx, fallbackTask.TaskID)
+	if err != nil {
+		l.logger.Warn("downloader refresh task before notification failed",
+			"task_id", fallbackTask.TaskID,
+			"status", fallbackTask.Status,
+			"error", err,
+		)
+		l.notifyTaskStatus(ctx, fallbackTask)
+		return
+	}
+	l.notifyTaskStatus(ctx, freshTask)
 }
 
 func (l queuePullLoop) executeTask(ctx context.Context, cfg config.Config, task service.Task) (dl.RunResult, dl.ErrorClass, error) {
