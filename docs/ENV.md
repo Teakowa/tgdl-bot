@@ -40,6 +40,11 @@ All configuration is read from environment variables.
 - `LOG_LEVEL`: optional log level
 - `ENV`: optional runtime environment name
 
+## Deployment (docker compose)
+
+- `BOT_IMAGE_TAG`: optional bot image tag for `ghcr.io/teakowa/tgdl-bot`, defaults to `latest`
+- `DOWNLOADER_IMAGE_TAG`: optional downloader image tag for `ghcr.io/teakowa/tgdl-downloader`, defaults to `latest`
+
 ## Phase 1 defaults
 
 The phase 1 scaffold assumes:

@@ -66,25 +66,25 @@ The downloader performs a session preflight check before it begins consuming the
 The execution model is: `message URL -> queue -> tdl forward`.
 On startup, downloader also re-enqueues historical failed/dead-lettered tasks that are still below the retry cap.
 
-## Docker build and run
+## Docker compose
 
-### 1. Build separate images
+### 1. Production start (prebuilt images only)
 
-```bash
-docker build -f deploy/Dockerfile.bot -t tgdl-bot:local .
-docker build -f deploy/Dockerfile.downloader -t tgdl-downloader:local --build-arg TDL_VERSION=v0.20.1 .
-```
-
-`tgdl-bot:local` contains only the bot binary.
-`tgdl-downloader:local` contains the downloader binary plus `/usr/local/bin/tdl`.
-
-### 2. Start with docker compose
+Set `BOT_IMAGE_TAG` and `DOWNLOADER_IMAGE_TAG` in `.env`, then run:
 
 ```bash
-docker compose -f deploy/docker-compose.yml up -d --build
+docker compose -f deploy/docker-compose.yml pull && docker compose -f deploy/docker-compose.yml up -d
 ```
 
-`bot` and `downloader` now run as separate images.
+`deploy/docker-compose.yml` is production-oriented and does not build images.
+
+### 2. Local/dev start with build override
+
+```bash
+docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.build.yml up -d --build
+```
+
+`deploy/docker-compose.build.yml` adds local build instructions and overrides images to `tgdl-bot:local` / `tgdl-downloader:local`.
 
 ### 3. Initialize tdl session in container context (first deployment only)
 
