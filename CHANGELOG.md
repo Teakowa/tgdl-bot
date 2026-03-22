@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.3.0](https://github.com/Teakowa/tgdl-bot/compare/v1.2.2...v1.3.0) (2026-03-22)
+
+
+### Features
+
+* **bot:** add bot http health and webhook routes ([2f6007f](https://github.com/Teakowa/tgdl-bot/commit/2f6007f92444c85a24ba06827747350059ce2199))
+
+
+### Bug Fixes
+
+* **bot:** unify queue delete and retry menus ([b2fbfda](https://github.com/Teakowa/tgdl-bot/commit/b2fbfda8302d537b75fb65c4403d6f4a6c92e8a3))
+
 ## [1.2.2](https://github.com/Teakowa/tgdl-bot/compare/v1.2.1...v1.2.2) (2026-03-22)
 
 
