@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"log/slog"
 	neturl "net/url"
@@ -12,6 +13,7 @@ import (
 
 	"tgdl-bot/internal/queue"
 	"tgdl-bot/internal/service"
+	"tgdl-bot/internal/tasknotify"
 )
 
 func BuildCommandReply(cmd ParsedCommand) string {
@@ -61,6 +63,7 @@ func (h Handler) HandleText(ctx context.Context, userID, chatID int64, text stri
 type HandleTextOutcome struct {
 	Reply         string
 	ReactionEmoji string
+	TaskID        string
 }
 
 func (h Handler) HandleTextWithOutcome(ctx context.Context, userID, chatID int64, text string) (HandleTextOutcome, error) {
@@ -178,8 +181,9 @@ func (h Handler) HandleTextWithOutcome(ctx context.Context, userID, chatID int64
 					return HandleTextOutcome{Reply: fmt.Sprintf("任务重建后入队失败\nTask ID: %s", task.TaskID), ReactionEmoji: statusReaction(service.StatusFailed)}, nil
 				}
 				return HandleTextOutcome{
-					Reply:         fmt.Sprintf("检测到历史失败任务，已重新创建并入队\nTask ID: %s\nURL: %s", task.TaskID, task.URL),
+					Reply:         tasknotify.FormatTaskStatusMessage(task),
 					ReactionEmoji: statusReaction(task.Status),
+					TaskID:        task.TaskID,
 				}, nil
 			}
 			return HandleTextOutcome{
@@ -198,10 +202,26 @@ func (h Handler) HandleTextWithOutcome(ctx context.Context, userID, chatID int64
 			return HandleTextOutcome{Reply: fmt.Sprintf("任务入队失败\nTask ID: %s", task.TaskID), ReactionEmoji: statusReaction(service.StatusFailed)}, nil
 		}
 		return HandleTextOutcome{
-			Reply:         fmt.Sprintf("转发任务已加入队列\nTask ID: %s\nURL: %s", task.TaskID, task.URL),
+			Reply:         tasknotify.FormatTaskStatusMessage(task),
 			ReactionEmoji: statusReaction(task.Status),
+			TaskID:        task.TaskID,
 		}, nil
 	}
+}
+
+func (h Handler) BindTaskMessageRefs(ctx context.Context, taskID string, sourceMessageID, statusMessageID int64) (service.Task, error) {
+	if h.Tasks == nil {
+		return service.Task{}, errors.New("task service is required")
+	}
+
+	if err := h.Tasks.UpdateTask(ctx, taskID, service.TaskUpdate{
+		SourceMessageID: &sourceMessageID,
+		StatusMessageID: &statusMessageID,
+	}); err != nil {
+		return service.Task{}, err
+	}
+
+	return h.Tasks.GetTask(ctx, taskID)
 }
 
 func (h Handler) enqueueTask(ctx context.Context, task service.Task) error {
@@ -273,20 +293,7 @@ func isRebuildableStatus(status service.Status) bool {
 }
 
 func statusReaction(status service.Status) string {
-	switch status {
-	case service.StatusQueued:
-		return "👀"
-	case service.StatusRunning:
-		return "⚡"
-	case service.StatusDone:
-		return "👍"
-	case service.StatusRetrying:
-		return "🔥"
-	case service.StatusFailed, service.StatusDeadLettered:
-		return "👎"
-	default:
-		return ""
-	}
+	return tasknotify.ReactionEmoji(status)
 }
 
 func formatStatus(task service.Task) string {

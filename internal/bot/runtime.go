@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"time"
 
+	"tgdl-bot/internal/tasknotify"
 	"tgdl-bot/internal/telegram"
 )
 
@@ -76,11 +77,30 @@ func (r Runtime) Run(ctx context.Context) error {
 			if outcome.SendRequest == nil {
 				continue
 			}
-			if _, err := r.Client.SendMessage(ctx, *outcome.SendRequest); err != nil {
+			sentMessage, err := r.Client.SendMessage(ctx, *outcome.SendRequest)
+			if err != nil {
 				r.log("send message failed", "chat_id", outcome.SendRequest.ChatID, "error", err)
 				continue
 			}
+			r.bindAndSyncTaskStatus(ctx, outcome, sentMessage)
 		}
+	}
+}
+
+func (r Runtime) bindAndSyncTaskStatus(ctx context.Context, outcome *UpdateOutcome, sentMessage telegram.Message) {
+	if outcome == nil || outcome.TaskID == "" || outcome.SourceMessageID == 0 || sentMessage.MessageID == 0 {
+		return
+	}
+
+	task, err := r.Handler.BindTaskMessageRefs(ctx, outcome.TaskID, outcome.SourceMessageID, sentMessage.MessageID)
+	if err != nil {
+		r.log("bind task message refs failed", "task_id", outcome.TaskID, "error", err)
+		return
+	}
+
+	notifier := tasknotify.Notifier{Client: r.Client, Logger: r.Logger}
+	if err := notifier.Notify(ctx, task); err != nil {
+		r.log("sync task status message failed", "task_id", task.TaskID, "error", err)
 	}
 }
 

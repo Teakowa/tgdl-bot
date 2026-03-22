@@ -86,6 +86,16 @@ type fakeRunnerImpl struct {
 	build func(context.Context, dl.DownloadRequest) (*exec.Cmd, error)
 }
 
+type fakeNotifier struct {
+	err   error
+	tasks []service.Task
+}
+
+func (f *fakeNotifier) Notify(_ context.Context, task service.Task) error {
+	f.tasks = append(f.tasks, task)
+	return f.err
+}
+
 func (f fakeRunnerImpl) Preflight(context.Context, dl.DownloadRequest) (dl.SessionState, error) {
 	return dl.SessionStateReady, nil
 }
@@ -96,6 +106,7 @@ func (f fakeRunnerImpl) BuildCommand(ctx context.Context, req dl.DownloadRequest
 
 func TestQueuePullLoopProcessMessageSuccessAcks(t *testing.T) {
 	q := &fakeQueue{}
+	notifier := &fakeNotifier{}
 	tasks := &fakeTasks{
 		task: service.Task{
 			TaskID:       "t1",
@@ -111,6 +122,7 @@ func TestQueuePullLoopProcessMessageSuccessAcks(t *testing.T) {
 		runner: fakeRunnerImpl{build: func(ctx context.Context, _ dl.DownloadRequest) (*exec.Cmd, error) {
 			return exec.CommandContext(ctx, "sh", "-c", "echo ok"), nil
 		}},
+		notifier:    notifier,
 		maxAttempts: 3,
 	}
 
@@ -124,6 +136,44 @@ func TestQueuePullLoopProcessMessageSuccessAcks(t *testing.T) {
 	}
 	if len(q.retried) != 0 {
 		t.Fatalf("expected no retries, got %+v", q.retried)
+	}
+	if len(notifier.tasks) < 2 {
+		t.Fatalf("expected running and done notifications, got %d", len(notifier.tasks))
+	}
+	if notifier.tasks[len(notifier.tasks)-1].Status != service.StatusDone {
+		t.Fatalf("expected done notification, got %s", notifier.tasks[len(notifier.tasks)-1].Status)
+	}
+}
+
+func TestQueuePullLoopNotifierFailureDoesNotAffectAck(t *testing.T) {
+	q := &fakeQueue{}
+	notifier := &fakeNotifier{err: errors.New("notify failed")}
+	tasks := &fakeTasks{
+		task: service.Task{
+			TaskID:       "t1",
+			URL:          "https://t.me/c/1/2",
+			TargetChatID: 100,
+			Status:       service.StatusQueued,
+		},
+	}
+	loop := queuePullLoop{
+		logger: slog.Default(),
+		queue:  q,
+		tasks:  tasks,
+		runner: fakeRunnerImpl{build: func(ctx context.Context, _ dl.DownloadRequest) (*exec.Cmd, error) {
+			return exec.CommandContext(ctx, "sh", "-c", "echo ok"), nil
+		}},
+		notifier:    notifier,
+		maxAttempts: 3,
+	}
+
+	loop.processMessage(context.Background(), config.Config{Downloader: config.DownloaderConfig{TaskTimeoutMinutes: 1}}, queue.ReceivedMessage{
+		LeaseID: "lease-1",
+		Body:    queue.Message{TaskID: "t1"},
+	})
+
+	if len(q.acked) != 1 || q.acked[0] != "lease-1" {
+		t.Fatalf("expected lease to be acked, got %+v", q.acked)
 	}
 }
 

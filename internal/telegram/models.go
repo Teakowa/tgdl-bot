@@ -7,6 +7,7 @@ import (
 type Client interface {
 	GetUpdates(ctx context.Context, req GetUpdatesRequest) (GetUpdatesResponse, error)
 	SendMessage(ctx context.Context, req SendMessageRequest) (Message, error)
+	EditMessageText(ctx context.Context, req EditMessageTextRequest) error
 	SetMessageReaction(ctx context.Context, req SetMessageReactionRequest) error
 }
 
@@ -29,6 +30,14 @@ type SendMessageRequest struct {
 	ParseMode             string
 	DisableWebPagePreview bool
 	ReplyToMessageID      *int64
+}
+
+type EditMessageTextRequest struct {
+	ChatID                int64
+	MessageID             int64
+	Text                  string
+	ParseMode             string
+	DisableWebPagePreview bool
 }
 
 type ReactionTypeEmoji struct {

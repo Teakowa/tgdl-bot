@@ -36,9 +36,9 @@ func (r *SQLiteTaskRepository) Create(ctx context.Context, task service.Task) er
 	_, err := r.DB.ExecContext(ctx, `
 		INSERT INTO tasks (
 			task_id, chat_id, user_id, target_chat_id, url, status, idempotency_key,
-			retry_count, lease_id, output_summary, error_message, exit_code,
+			retry_count, source_message_id, status_message_id, lease_id, output_summary, error_message, exit_code,
 			created_at, updated_at, started_at, finished_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		task.TaskID,
 		task.ChatID,
 		task.UserID,
@@ -47,6 +47,8 @@ func (r *SQLiteTaskRepository) Create(ctx context.Context, task service.Task) er
 		string(task.Status),
 		task.IdempotencyKey,
 		task.RetryCount,
+		nullableInt64(task.SourceMessageID),
+		nullableInt64(task.StatusMessageID),
 		nullableString(task.LeaseID),
 		nullableString(task.OutputSummary),
 		nullableString(task.ErrorMessage),
@@ -69,11 +71,13 @@ func (r *SQLiteTaskRepository) Update(ctx context.Context, task service.Task) er
 
 	res, err := r.DB.ExecContext(ctx, `
 		UPDATE tasks
-		SET status = ?, retry_count = ?, lease_id = ?, output_summary = ?, error_message = ?,
+		SET status = ?, retry_count = ?, source_message_id = ?, status_message_id = ?, lease_id = ?, output_summary = ?, error_message = ?,
 		    exit_code = ?, updated_at = ?, started_at = ?, finished_at = ?
 		WHERE task_id = ?`,
 		string(task.Status),
 		task.RetryCount,
+		nullableInt64(task.SourceMessageID),
+		nullableInt64(task.StatusMessageID),
 		nullableString(task.LeaseID),
 		nullableString(task.OutputSummary),
 		nullableString(task.ErrorMessage),
@@ -102,7 +106,7 @@ func (r *SQLiteTaskRepository) FindByID(ctx context.Context, taskID string) (ser
 	}
 	row := r.DB.QueryRowContext(ctx, `
 		SELECT task_id, chat_id, user_id, target_chat_id, url, status, idempotency_key,
-		       retry_count, lease_id, output_summary, error_message, exit_code,
+		       retry_count, source_message_id, status_message_id, lease_id, output_summary, error_message, exit_code,
 		       created_at, updated_at, started_at, finished_at
 		FROM tasks
 		WHERE task_id = ?`, taskID)
@@ -122,7 +126,7 @@ func (r *SQLiteTaskRepository) FindByIdempotencyKey(ctx context.Context, idempot
 	}
 	row := r.DB.QueryRowContext(ctx, `
 		SELECT task_id, chat_id, user_id, target_chat_id, url, status, idempotency_key,
-		       retry_count, lease_id, output_summary, error_message, exit_code,
+		       retry_count, source_message_id, status_message_id, lease_id, output_summary, error_message, exit_code,
 		       created_at, updated_at, started_at, finished_at
 		FROM tasks
 		WHERE idempotency_key = ?
@@ -151,7 +155,7 @@ func (r *SQLiteTaskRepository) ListFailedForRetry(ctx context.Context, maxRetryC
 
 	rows, err := r.DB.QueryContext(ctx, `
 		SELECT task_id, chat_id, user_id, target_chat_id, url, status, idempotency_key,
-		       retry_count, lease_id, output_summary, error_message, exit_code,
+		       retry_count, source_message_id, status_message_id, lease_id, output_summary, error_message, exit_code,
 		       created_at, updated_at, started_at, finished_at
 		FROM tasks
 		WHERE status IN (?, ?)
@@ -173,7 +177,7 @@ func (r *SQLiteTaskRepository) ListFailedForRetry(ctx context.Context, maxRetryC
 		var row TaskRow
 		if err := rows.Scan(
 			&row.TaskID, &row.ChatID, &row.UserID, &row.TargetChatID, &row.URL, &row.Status, &row.IdempotencyKey,
-			&row.RetryCount, &row.LeaseID, &row.OutputSummary, &row.ErrorMessage, &row.ExitCode,
+			&row.RetryCount, &row.SourceMessageID, &row.StatusMessageID, &row.LeaseID, &row.OutputSummary, &row.ErrorMessage, &row.ExitCode,
 			&row.CreatedAt, &row.UpdatedAt, &row.StartedAt, &row.FinishedAt,
 		); err != nil {
 			return nil, fmt.Errorf("storage: scan failed retry task row: %w", err)
@@ -221,7 +225,7 @@ func (r *SQLiteTaskRepository) ListRecentByUser(ctx context.Context, userID int6
 
 	rows, err := r.DB.QueryContext(ctx, `
 		SELECT task_id, chat_id, user_id, target_chat_id, url, status, idempotency_key,
-		       retry_count, lease_id, output_summary, error_message, exit_code,
+		       retry_count, source_message_id, status_message_id, lease_id, output_summary, error_message, exit_code,
 		       created_at, updated_at, started_at, finished_at
 		FROM tasks
 		WHERE user_id = ?
@@ -237,7 +241,7 @@ func (r *SQLiteTaskRepository) ListRecentByUser(ctx context.Context, userID int6
 		var row TaskRow
 		if err := rows.Scan(
 			&row.TaskID, &row.ChatID, &row.UserID, &row.TargetChatID, &row.URL, &row.Status, &row.IdempotencyKey,
-			&row.RetryCount, &row.LeaseID, &row.OutputSummary, &row.ErrorMessage, &row.ExitCode,
+			&row.RetryCount, &row.SourceMessageID, &row.StatusMessageID, &row.LeaseID, &row.OutputSummary, &row.ErrorMessage, &row.ExitCode,
 			&row.CreatedAt, &row.UpdatedAt, &row.StartedAt, &row.FinishedAt,
 		); err != nil {
 			return nil, fmt.Errorf("storage: scan recent task row: %w", err)
@@ -251,22 +255,24 @@ func (r *SQLiteTaskRepository) ListRecentByUser(ctx context.Context, userID int6
 }
 
 type TaskRow struct {
-	TaskID         string
-	ChatID         int64
-	UserID         int64
-	TargetChatID   int64
-	URL            string
-	Status         string
-	IdempotencyKey string
-	RetryCount     int
-	LeaseID        sql.NullString
-	OutputSummary  sql.NullString
-	ErrorMessage   sql.NullString
-	ExitCode       sql.NullInt64
-	CreatedAt      time.Time
-	UpdatedAt      time.Time
-	StartedAt      sql.NullTime
-	FinishedAt     sql.NullTime
+	TaskID          string
+	ChatID          int64
+	UserID          int64
+	TargetChatID    int64
+	URL             string
+	Status          string
+	IdempotencyKey  string
+	RetryCount      int
+	SourceMessageID sql.NullInt64
+	StatusMessageID sql.NullInt64
+	LeaseID         sql.NullString
+	OutputSummary   sql.NullString
+	ErrorMessage    sql.NullString
+	ExitCode        sql.NullInt64
+	CreatedAt       time.Time
+	UpdatedAt       time.Time
+	StartedAt       sql.NullTime
+	FinishedAt      sql.NullTime
 }
 
 type scanner interface {
@@ -277,7 +283,7 @@ func scanTask(s scanner) (service.Task, error) {
 	var row TaskRow
 	if err := s.Scan(
 		&row.TaskID, &row.ChatID, &row.UserID, &row.TargetChatID, &row.URL, &row.Status, &row.IdempotencyKey,
-		&row.RetryCount, &row.LeaseID, &row.OutputSummary, &row.ErrorMessage, &row.ExitCode,
+		&row.RetryCount, &row.SourceMessageID, &row.StatusMessageID, &row.LeaseID, &row.OutputSummary, &row.ErrorMessage, &row.ExitCode,
 		&row.CreatedAt, &row.UpdatedAt, &row.StartedAt, &row.FinishedAt,
 	); err != nil {
 		return service.Task{}, err
@@ -297,6 +303,14 @@ func fromRow(row TaskRow) service.Task {
 		RetryCount:     row.RetryCount,
 		CreatedAt:      row.CreatedAt.UTC(),
 		UpdatedAt:      row.UpdatedAt.UTC(),
+	}
+	if row.SourceMessageID.Valid {
+		v := row.SourceMessageID.Int64
+		task.SourceMessageID = &v
+	}
+	if row.StatusMessageID.Valid {
+		v := row.StatusMessageID.Int64
+		task.StatusMessageID = &v
 	}
 	if row.LeaseID.Valid {
 		v := row.LeaseID.String
@@ -333,6 +347,13 @@ func nullableString(v *string) any {
 }
 
 func nullableInt(v *int) any {
+	if v == nil {
+		return nil
+	}
+	return *v
+}
+
+func nullableInt64(v *int64) any {
 	if v == nil {
 		return nil
 	}

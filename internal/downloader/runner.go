@@ -120,7 +120,7 @@ func buildForwardArgs(req DownloadRequest) ([]string, error) {
 	}
 
 	if req.Namespace != "" {
-		args = append(args, "--namespace", req.Namespace)
+		args = append(args, "--ns", req.Namespace)
 	}
 	if req.Storage != "" {
 		args = append(args, "--storage", req.Storage)

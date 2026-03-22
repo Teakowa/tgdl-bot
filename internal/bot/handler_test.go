@@ -20,6 +20,8 @@ type fakeTaskQuery struct {
 	createFn        func(service.CreateQueuedTaskRequest) (service.Task, error)
 	deleteFailedFn  func(string) (int64, error)
 	updateTaskCalls int
+	lastUpdate      *service.TaskUpdate
+	updatedTaskID   string
 }
 
 type fakeQueue struct {
@@ -90,8 +92,11 @@ func (f *fakeTaskQuery) DeleteFailedByIdempotencyKey(_ context.Context, key stri
 	return 0, nil
 }
 
-func (f *fakeTaskQuery) UpdateTask(context.Context, string, service.TaskUpdate) error {
+func (f *fakeTaskQuery) UpdateTask(_ context.Context, taskID string, update service.TaskUpdate) error {
 	f.updateTaskCalls++
+	f.updatedTaskID = taskID
+	copied := update
+	f.lastUpdate = &copied
 	return f.err
 }
 
@@ -246,7 +251,7 @@ func TestHandlerDuplicateFailedTaskRebuildsAndEnqueues(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !strings.Contains(reply, "已重新创建并入队") {
+	if !strings.Contains(reply, "任务已入队") {
 		t.Fatalf("unexpected reply: %s", reply)
 	}
 	if createCalls != 2 {
@@ -295,7 +300,7 @@ func TestHandlerDuplicateDeadLetteredTaskRebuildsAndEnqueues(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !strings.Contains(reply, "已重新创建并入队") {
+	if !strings.Contains(reply, "任务已入队") {
 		t.Fatalf("unexpected reply: %s", reply)
 	}
 	if len(q.messages) != 1 {
@@ -317,7 +322,7 @@ func TestHandleTextWithOutcomeReturnsReactionEmoji(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if outcome.ReactionEmoji != "🔥" {
+	if outcome.ReactionEmoji != "🔄" {
 		t.Fatalf("unexpected reaction emoji: %q", outcome.ReactionEmoji)
 	}
 }
@@ -380,6 +385,32 @@ func TestHandlerDuplicateTaskEmitsExistingHitLog(t *testing.T) {
 
 	if !containsLogMessage(logs.Messages(), "bot task existing hit") {
 		t.Fatalf("expected existing-hit log, got %v", logs.Messages())
+	}
+}
+
+func TestBindTaskMessageRefsUpdatesTaskMetadata(t *testing.T) {
+	sourceID := int64(88)
+	statusID := int64(99)
+	tasks := &fakeTaskQuery{
+		task: service.Task{TaskID: "task-1", Status: service.StatusQueued},
+	}
+	h := Handler{Tasks: tasks}
+
+	task, err := h.BindTaskMessageRefs(context.Background(), "task-1", sourceID, statusID)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if task.TaskID != "task-1" {
+		t.Fatalf("unexpected task: %+v", task)
+	}
+	if tasks.updateTaskCalls != 1 {
+		t.Fatalf("expected one update call, got %d", tasks.updateTaskCalls)
+	}
+	if tasks.lastUpdate == nil || tasks.lastUpdate.SourceMessageID == nil || *tasks.lastUpdate.SourceMessageID != sourceID {
+		t.Fatalf("unexpected source message id update: %+v", tasks.lastUpdate)
+	}
+	if tasks.lastUpdate == nil || tasks.lastUpdate.StatusMessageID == nil || *tasks.lastUpdate.StatusMessageID != statusID {
+		t.Fatalf("unexpected status message id update: %+v", tasks.lastUpdate)
 	}
 }
 

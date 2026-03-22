@@ -39,22 +39,24 @@ func IsValidStatus(status string) bool {
 }
 
 type Task struct {
-	TaskID         string     `json:"task_id"`
-	ChatID         int64      `json:"chat_id"`
-	UserID         int64      `json:"user_id"`
-	TargetChatID   int64      `json:"target_chat_id"`
-	URL            string     `json:"url"`
-	Status         Status     `json:"status"`
-	CreatedAt      time.Time  `json:"created_at"`
-	UpdatedAt      time.Time  `json:"updated_at"`
-	StartedAt      *time.Time `json:"started_at,omitempty"`
-	FinishedAt     *time.Time `json:"finished_at,omitempty"`
-	RetryCount     int        `json:"retry_count"`
-	LeaseID        *string    `json:"lease_id,omitempty"`
-	OutputSummary  *string    `json:"output_summary,omitempty"`
-	ErrorMessage   *string    `json:"error_message,omitempty"`
-	ExitCode       *int       `json:"exit_code,omitempty"`
-	IdempotencyKey string     `json:"idempotency_key"`
+	TaskID          string     `json:"task_id"`
+	ChatID          int64      `json:"chat_id"`
+	UserID          int64      `json:"user_id"`
+	TargetChatID    int64      `json:"target_chat_id"`
+	URL             string     `json:"url"`
+	Status          Status     `json:"status"`
+	CreatedAt       time.Time  `json:"created_at"`
+	UpdatedAt       time.Time  `json:"updated_at"`
+	StartedAt       *time.Time `json:"started_at,omitempty"`
+	FinishedAt      *time.Time `json:"finished_at,omitempty"`
+	SourceMessageID *int64     `json:"source_message_id,omitempty"`
+	StatusMessageID *int64     `json:"status_message_id,omitempty"`
+	RetryCount      int        `json:"retry_count"`
+	LeaseID         *string    `json:"lease_id,omitempty"`
+	OutputSummary   *string    `json:"output_summary,omitempty"`
+	ErrorMessage    *string    `json:"error_message,omitempty"`
+	ExitCode        *int       `json:"exit_code,omitempty"`
+	IdempotencyKey  string     `json:"idempotency_key"`
 }
 
 type CreateQueuedTaskRequest struct {
@@ -67,14 +69,16 @@ type CreateQueuedTaskRequest struct {
 }
 
 type TaskUpdate struct {
-	Status        Status
-	RetryCount    *int
-	LeaseID       *string
-	OutputSummary *string
-	ErrorMessage  *string
-	ExitCode      *int
-	StartedAt     *time.Time
-	FinishedAt    *time.Time
+	Status          Status
+	RetryCount      *int
+	LeaseID         *string
+	OutputSummary   *string
+	ErrorMessage    *string
+	ExitCode        *int
+	StartedAt       *time.Time
+	FinishedAt      *time.Time
+	SourceMessageID *int64
+	StatusMessageID *int64
 }
 
 type TaskService interface {

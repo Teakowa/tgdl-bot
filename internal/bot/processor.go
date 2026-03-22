@@ -9,6 +9,8 @@ import (
 type UpdateOutcome struct {
 	SendRequest     *telegram.SendMessageRequest
 	ReactionRequest *telegram.SetMessageReactionRequest
+	TaskID          string
+	SourceMessageID int64
 }
 
 func (h Handler) HandleUpdate(ctx context.Context, update telegram.Update) (*UpdateOutcome, error) {
@@ -42,6 +44,10 @@ func (h Handler) HandleUpdate(ctx context.Context, update telegram.Update) (*Upd
 				{Type: "emoji", Emoji: outcome.ReactionEmoji},
 			},
 		}
+	}
+	if outcome.TaskID != "" && update.Message.MessageID > 0 {
+		result.TaskID = outcome.TaskID
+		result.SourceMessageID = update.Message.MessageID
 	}
 	return result, nil
 }

@@ -23,6 +23,8 @@ import (
 	"tgdl-bot/internal/queue"
 	"tgdl-bot/internal/service"
 	"tgdl-bot/internal/storage"
+	"tgdl-bot/internal/tasknotify"
+	"tgdl-bot/internal/telegram"
 
 	_ "modernc.org/sqlite"
 )
@@ -73,11 +75,16 @@ type taskService interface {
 	ListFailedTasksForRetry(ctx context.Context, maxRetryCount int, limit int) ([]service.Task, error)
 }
 
+type taskStatusNotifier interface {
+	Notify(ctx context.Context, task service.Task) error
+}
+
 type queuePullLoop struct {
 	logger      *slog.Logger
 	queue       queueConsumer
 	tasks       taskService
 	runner      dl.Runner
+	notifier    taskStatusNotifier
 	maxAttempts int
 }
 
@@ -177,6 +184,8 @@ func (l queuePullLoop) requeueFailedTasksOnStartup(ctx context.Context) {
 			"retry_count", task.RetryCount,
 			"status_to", status,
 		)
+		task.Status = status
+		l.notifyTaskStatus(ctx, task)
 	}
 }
 
@@ -200,16 +209,23 @@ func main() {
 		logger.Error("downloader exited", "error", fmt.Errorf("apply sqlite migrations: %w", err))
 		os.Exit(1)
 	}
+	if err := storage.EnsureTaskColumns(context.Background(), db); err != nil {
+		logger.Error("downloader exited", "error", fmt.Errorf("ensure sqlite task columns: %w", err))
+		os.Exit(1)
+	}
 
 	taskService := service.NewTaskService(store.TaskRepository())
 	queueClient := queue.NewCloudflareClient(cfg.Cloudflare.AccountID, cfg.Cloudflare.QueueID, cfg.Cloudflare.APIToken, 20*time.Second)
 	runner := dl.DefaultRunner{PreflightChecker: dl.NewTDLPreflightChecker()}
+	notifyClient := telegram.NewHTTPClient(cfg.Telegram.APIBase, cfg.Telegram.BotToken, 15*time.Second)
+	statusNotifier := tasknotify.Notifier{Client: notifyClient, Logger: logger}
 
 	if err := run(context.Background(), cfg, logger, startupPreflightHook{logger: logger, runner: runner}, queuePullLoop{
 		logger:      logger,
 		queue:       queueClient,
 		tasks:       taskService,
 		runner:      runner,
+		notifier:    statusNotifier,
 		maxAttempts: 3,
 	}); err != nil {
 		logger.Error("downloader exited", "error", err)
@@ -294,6 +310,11 @@ func (l queuePullLoop) processMessage(ctx context.Context, cfg config.Config, me
 		"status_from", statusFrom,
 		"status_to", service.StatusRunning,
 	)
+	task.Status = service.StatusRunning
+	task.LeaseID = &leaseID
+	task.StartedAt = &startedAt
+	task.ErrorMessage = nil
+	l.notifyTaskStatus(ctx, task)
 
 	result, errorClass, runErr := l.executeTask(ctx, cfg, task)
 	if runErr == nil {
@@ -315,6 +336,11 @@ func (l queuePullLoop) processMessage(ctx context.Context, cfg config.Config, me
 			"status_to", service.StatusDone,
 			"duration_ms", result.Duration.Milliseconds(),
 		)
+		task.Status = service.StatusDone
+		task.OutputSummary = &out
+		task.FinishedAt = &finishedAt
+		task.ErrorMessage = nil
+		l.notifyTaskStatus(ctx, task)
 		l.logger.Info("downloader queue action",
 			"task_id", task.TaskID,
 			"lease_id", message.LeaseID,
@@ -361,6 +387,15 @@ func (l queuePullLoop) processMessage(ctx context.Context, cfg config.Config, me
 		"exit_code", result.ExitCode,
 		"error_class", errorClass,
 	)
+	task.Status = status
+	task.RetryCount = retryCount
+	task.ErrorMessage = &errorMessage
+	task.FinishedAt = &finishedAt
+	if result.ExitCode != 0 {
+		exitCode := result.ExitCode
+		task.ExitCode = &exitCode
+	}
+	l.notifyTaskStatus(ctx, task)
 
 	if shouldRetry {
 		l.logger.Info("downloader queue action",
@@ -379,6 +414,22 @@ func (l queuePullLoop) processMessage(ctx context.Context, cfg config.Config, me
 		"error_class", errorClass,
 	)
 	_ = l.queue.Ack(ctx, []string{message.LeaseID})
+}
+
+func (l queuePullLoop) notifyTaskStatus(ctx context.Context, task service.Task) {
+	if l.notifier == nil {
+		return
+	}
+
+	notifyCtx, cancel := context.WithTimeout(ctx, 8*time.Second)
+	defer cancel()
+	if err := l.notifier.Notify(notifyCtx, task); err != nil {
+		l.logger.Warn("downloader task status notification failed",
+			"task_id", task.TaskID,
+			"status", task.Status,
+			"error", err,
+		)
+	}
 }
 
 func (l queuePullLoop) executeTask(ctx context.Context, cfg config.Config, task service.Task) (dl.RunResult, dl.ErrorClass, error) {

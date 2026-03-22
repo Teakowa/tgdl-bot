@@ -128,6 +128,55 @@ func (c *HTTPClient) SendMessage(ctx context.Context, req SendMessageRequest) (M
 	return out.Result, nil
 }
 
+func (c *HTTPClient) EditMessageText(ctx context.Context, req EditMessageTextRequest) error {
+	payload := map[string]any{
+		"chat_id":    req.ChatID,
+		"message_id": req.MessageID,
+		"text":       req.Text,
+	}
+	if req.ParseMode != "" {
+		payload["parse_mode"] = req.ParseMode
+	}
+	if req.DisableWebPagePreview {
+		payload["disable_web_page_preview"] = true
+	}
+
+	b, err := json.Marshal(payload)
+	if err != nil {
+		return err
+	}
+
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.methodURL("editMessageText"), bytes.NewReader(b))
+	if err != nil {
+		return err
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.httpClient.Do(httpReq)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return err
+	}
+
+	var out struct {
+		Ok          bool   `json:"ok"`
+		ErrorCode   int    `json:"error_code,omitempty"`
+		Description string `json:"description,omitempty"`
+	}
+	if err := json.Unmarshal(body, &out); err != nil {
+		return fmt.Errorf("telegram editMessageText decode: %w", err)
+	}
+	if !out.Ok {
+		return fmt.Errorf("telegram editMessageText api error: %d %s", out.ErrorCode, out.Description)
+	}
+	return nil
+}
+
 func (c *HTTPClient) SetMessageReaction(ctx context.Context, req SetMessageReactionRequest) error {
 	payload := map[string]any{
 		"chat_id":    req.ChatID,

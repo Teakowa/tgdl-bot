@@ -183,6 +183,12 @@ func (s taskService) UpdateTask(ctx context.Context, taskID string, update TaskU
 		t := update.FinishedAt.UTC()
 		task.FinishedAt = &t
 	}
+	if update.SourceMessageID != nil {
+		task.SourceMessageID = update.SourceMessageID
+	}
+	if update.StatusMessageID != nil {
+		task.StatusMessageID = update.StatusMessageID
+	}
 	task.UpdatedAt = time.Now().UTC()
 
 	if err := s.repo.Update(ctx, task); err != nil {

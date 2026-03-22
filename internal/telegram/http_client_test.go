@@ -46,6 +46,62 @@ func TestSetMessageReactionSendsExpectedPayload(t *testing.T) {
 	}
 }
 
+func TestEditMessageTextSendsExpectedPayload(t *testing.T) {
+	var capturedPath string
+	var captured map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		capturedPath = r.URL.Path
+		defer r.Body.Close()
+		if err := json.NewDecoder(r.Body).Decode(&captured); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"ok":true,"result":{"message_id":456}}`))
+	}))
+	defer server.Close()
+
+	client := NewHTTPClient(server.URL, "token", time.Second)
+	err := client.EditMessageText(context.Background(), EditMessageTextRequest{
+		ChatID:    123,
+		MessageID: 456,
+		Text:      "new text",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if capturedPath != "/bottoken/editMessageText" {
+		t.Fatalf("unexpected path: %s", capturedPath)
+	}
+	if int(captured["chat_id"].(float64)) != 123 {
+		t.Fatalf("unexpected chat_id: %v", captured["chat_id"])
+	}
+	if int(captured["message_id"].(float64)) != 456 {
+		t.Fatalf("unexpected message_id: %v", captured["message_id"])
+	}
+	if captured["text"] != "new text" {
+		t.Fatalf("unexpected text: %v", captured["text"])
+	}
+}
+
+func TestEditMessageTextReturnsAPIError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"ok":false,"error_code":400,"description":"bad request"}`))
+	}))
+	defer server.Close()
+
+	client := NewHTTPClient(server.URL, "token", time.Second)
+	err := client.EditMessageText(context.Background(), EditMessageTextRequest{
+		ChatID:    1,
+		MessageID: 2,
+		Text:      "updated",
+	})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+}
+
 func TestSetMessageReactionReturnsAPIError(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")

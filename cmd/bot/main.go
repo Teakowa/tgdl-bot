@@ -50,6 +50,9 @@ func run(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 	if err := store.ApplyMigrations(ctx, storage.DefaultMigrations()...); err != nil {
 		return fmt.Errorf("apply sqlite migrations: %w", err)
 	}
+	if err := storage.EnsureTaskColumns(ctx, db); err != nil {
+		return fmt.Errorf("ensure sqlite task columns: %w", err)
+	}
 	taskService := service.NewTaskService(store.TaskRepository())
 	queueClient := queue.NewCloudflareClient(cfg.Cloudflare.AccountID, cfg.Cloudflare.QueueID, cfg.Cloudflare.APIToken, 20*time.Second)
 

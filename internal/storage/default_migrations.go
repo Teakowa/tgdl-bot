@@ -12,6 +12,8 @@ func DefaultMigrations() []Migration {
   status TEXT NOT NULL,
   idempotency_key TEXT NOT NULL,
   retry_count INTEGER NOT NULL DEFAULT 0,
+  source_message_id INTEGER,
+  status_message_id INTEGER,
   lease_id TEXT,
   output_summary TEXT,
   error_message TEXT,
