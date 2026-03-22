@@ -2,6 +2,32 @@
 
 This repository is under active concurrent editing. Do not revert, overwrite, or "clean up" work you did not create.
 
+## Golden Rule
+
+**Always prefix commands with `rtk`**. If RTK has a dedicated filter, it uses it. If not, it passes through unchanged. This means RTK is always safe to use.
+
+**Important**: Even in command chains with `&&`, use `rtk`:
+```bash
+# ❌ Wrong
+git add . && git commit -m "msg" && git push
+
+# ✅ Correct
+rtk git add . && rtk git commit -m "msg" && rtk git push
+```
+
+## RTK Commands
+
+| Category | Commands |
+|----------|----------|
+| Tests | vitest, playwright, cargo test |
+| Build | next, tsc, lint, prettier |
+| Git | status, log, diff, add, commit |
+| GitHub | gh pr, gh run, gh issue |
+| Package Managers | pnpm, npm, npx |
+| Files | ls, read, grep, find |
+| Infrastructure | docker, kubectl |
+| Network | curl, wget |
+
 ## Safety rules
 
 - Preserve existing untracked or modified files unless the user explicitly asks otherwise.
@@ -50,8 +76,8 @@ This repository is under active concurrent editing. Do not revert, overwrite, or
 
 ## Container deployment constraints
 
-- Use a single runtime image for both bot and downloader, selected by `APP_MODE=bot|downloader`.
-- Pin `tdl` to a fixed release version in `Dockerfile` (`ARG TDL_VERSION`) and upgrade by rebuilding image.
+- Use separate runtime images for bot and downloader via `deploy/Dockerfile.bot` and `deploy/Dockerfile.downloader`.
+- Pin `tdl` to a fixed release version in `deploy/Dockerfile.downloader` (`ARG TDL_VERSION`) and upgrade by rebuilding the downloader image.
 - Keep downloader session state on persistent storage (`/app/data` and `/root/.tdl` volumes).
 - Keep container defaults aligned with `.env.example`:
   - `TDL_BIN=/usr/local/bin/tdl`

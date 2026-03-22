@@ -60,31 +60,30 @@ On startup, downloader also re-enqueues historical failed/dead-lettered tasks th
 
 ## Docker build and run
 
-### 1. Build one image for bot/downloader
+### 1. Build separate images
 
 ```bash
-docker build -t tgdl-bot:local --build-arg TDL_VERSION=v0.20.1 .
+docker build -f deploy/Dockerfile.bot -t tgdl-bot:local .
+docker build -f deploy/Dockerfile.downloader -t tgdl-downloader:local --build-arg TDL_VERSION=v0.20.1 .
 ```
 
-The image contains:
-- `/usr/local/bin/tgdl-bot`
-- `/usr/local/bin/tgdl-downloader`
-- `/usr/local/bin/tdl`
+`tgdl-bot:local` contains only the bot binary.
+`tgdl-downloader:local` contains the downloader binary plus `/usr/local/bin/tdl`.
 
 ### 2. Start with docker compose
 
 ```bash
-docker compose -f deploy/docker-compose.yml up -d
+docker compose -f deploy/docker-compose.yml up -d --build
 ```
 
-`bot` and `downloader` use the same image and are selected by `APP_MODE`.
+`bot` and `downloader` now run as separate images.
 
 ### 3. Initialize tdl session in container context (first deployment only)
 
 Run this once before expecting downloader consumption to succeed:
 
 ```bash
-docker compose -f deploy/docker-compose.yml run --rm --entrypoint tdl downloader login -T qr -n default
+docker compose -f deploy/docker-compose.yml run --rm --entrypoint /usr/local/bin/tdl downloader login -T qr -n default
 ```
 
 This login state is persisted in Docker volumes (`tgdl-data` and `tgdl-tdl-session`).

@@ -2,22 +2,21 @@ FROM golang:1.24-bookworm AS builder
 
 WORKDIR /src
 
-COPY go.mod ./
+COPY go.mod go.sum ./
 RUN go mod download
 
 COPY . .
 
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o /out/tgdl-bot ./cmd/bot
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o /out/tgdl-downloader ./cmd/downloader
+ARG TARGETOS
+ARG TARGETARCH
 
-FROM debian:bookworm-slim AS runtime
+RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH:-amd64} \
+    go build -trimpath -ldflags="-s -w" -o /out/tgdl-downloader ./cmd/downloader
+
+FROM debian:bookworm-slim AS tdl-installer
 
 ARG TARGETARCH
 ARG TDL_VERSION=v0.20.1
-
-ENV APP_MODE=bot
-ENV TDL_BIN=/usr/local/bin/tdl
-ENV SQLITE_PATH=/app/data/tasks.db
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates curl tar \
@@ -34,16 +33,16 @@ RUN set -eux; \
     install -m 0755 /tmp/tdl /usr/local/bin/tdl; \
     rm -rf /tmp/tdl /tmp/tdl.tar.gz
 
+FROM gcr.io/distroless/base-debian12 AS runtime
+
+ENV TDL_BIN=/usr/local/bin/tdl
+ENV SQLITE_PATH=/app/data/tasks.db
+
 WORKDIR /app
 
-COPY --from=builder /out/tgdl-bot /usr/local/bin/tgdl-bot
 COPY --from=builder /out/tgdl-downloader /usr/local/bin/tgdl-downloader
-COPY scripts/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+COPY --from=tdl-installer /usr/local/bin/tdl /usr/local/bin/tdl
 
-RUN chmod +x /usr/local/bin/docker-entrypoint.sh \
-    && mkdir -p /app/data
+VOLUME ["/app/data", "/root/.tdl"]
 
-VOLUME ["/app/data"]
-
-ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
-CMD ["bot"]
+ENTRYPOINT ["/usr/local/bin/tgdl-downloader"]
