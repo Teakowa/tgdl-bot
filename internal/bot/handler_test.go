@@ -200,6 +200,43 @@ func TestHandlerQueueCommand(t *testing.T) {
 	}
 }
 
+func TestHandlerDeleteCommandWithoutTaskIDShowsQueueSelection(t *testing.T) {
+	h := Handler{
+		Tasks: &fakeTaskQuery{activeTasks: []service.Task{
+			{TaskID: "task-a", Status: service.StatusRunning, URL: "https://t.me/c/1/2"},
+			{TaskID: "task-b", Status: service.StatusQueued, URL: "https://t.me/c/1/3"},
+		}},
+	}
+
+	outcome, err := h.HandleTextWithOutcome(context.Background(), 1, 1, "/delete")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(outcome.Reply, "1. https://t.me/c/1/2 | task-a | running") {
+		t.Fatalf("unexpected delete selection reply: %s", outcome.Reply)
+	}
+	if outcome.ReplyMarkup == nil || len(outcome.ReplyMarkup.InlineKeyboard) != 2 {
+		t.Fatalf("expected delete selection keyboard, got %+v", outcome.ReplyMarkup)
+	}
+}
+
+func TestHandlerDeleteCommandWithoutTaskIDShowsEmptyQueue(t *testing.T) {
+	h := Handler{
+		Tasks: &fakeTaskQuery{activeTasks: nil},
+	}
+
+	outcome, err := h.HandleTextWithOutcome(context.Background(), 1, 1, "/delete")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if outcome.Reply != "当前无执行中或排队中的任务。" {
+		t.Fatalf("unexpected empty delete reply: %s", outcome.Reply)
+	}
+	if outcome.ReplyMarkup != nil {
+		t.Fatalf("expected no keyboard for empty delete queue, got %+v", outcome.ReplyMarkup)
+	}
+}
+
 func TestHandlerDeleteCommand(t *testing.T) {
 	tasks := &fakeTaskQuery{
 		task: service.Task{

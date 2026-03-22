@@ -35,7 +35,7 @@ func TestBuildCommandReply(t *testing.T) {
 	if got := BuildCommandReply(ParsedCommand{Name: CommandStart}); got == "" {
 		t.Fatal("expected /start reply")
 	}
-	if got := BuildCommandReply(ParsedCommand{Name: CommandDelete}); got != "用法: /delete <task_id> [-f|--force]" {
+	if got := BuildCommandReply(ParsedCommand{Name: CommandDelete}); got != "用法: /delete [task_id] [-f|--force]" {
 		t.Fatalf("unexpected delete usage: %s", got)
 	}
 }

@@ -37,7 +37,7 @@ func BuildCommandReply(cmd ParsedCommand) string {
 			"/status <task_id>",
 			"/last",
 			"/queue",
-			"/delete <task_id> [-f|--force]",
+			"/delete [task_id] [-f|--force]",
 			"/retry <task_id>",
 		}, "\n")
 	case CommandStatus:
@@ -50,7 +50,7 @@ func BuildCommandReply(cmd ParsedCommand) string {
 	case CommandQueue:
 		return "活跃任务查询已接收（running/queued/retrying）。"
 	case CommandDelete:
-		return "用法: /delete <task_id> [-f|--force]"
+		return "用法: /delete [task_id] [-f|--force]"
 	case CommandRetry:
 		return "用法: /retry <task_id>"
 	default:
@@ -134,7 +134,18 @@ func (h Handler) HandleTextWithOutcome(ctx context.Context, userID, chatID int64
 		return HandleTextOutcome{Reply: reply, ReplyMarkup: buildQueueDeleteKeyboard(tasks)}, nil
 	case CommandDelete:
 		if cmd.TaskID == "" {
-			return HandleTextOutcome{Reply: BuildCommandReply(cmd)}, nil
+			if h.Tasks == nil {
+				return HandleTextOutcome{Reply: "任务删除暂未启用。"}, nil
+			}
+			tasks, err := h.Tasks.ListActiveTasks(ctx, userID, activeTaskListLimit)
+			if err != nil {
+				return HandleTextOutcome{}, err
+			}
+			reply := formatQueue(tasks)
+			if len(tasks) == 0 {
+				return HandleTextOutcome{Reply: reply}, nil
+			}
+			return HandleTextOutcome{Reply: reply, ReplyMarkup: buildQueueDeleteKeyboard(tasks)}, nil
 		}
 		return h.handleDeleteByTaskID(ctx, userID, cmd.TaskID, cmd.Force)
 	case CommandRetry:
@@ -277,7 +288,7 @@ func (h Handler) handleDeleteByTaskID(ctx context.Context, userID int64, taskID 
 	}
 	taskID = strings.TrimSpace(taskID)
 	if taskID == "" {
-		return HandleTextOutcome{Reply: "用法: /delete <task_id> [-f|--force]"}, nil
+		return HandleTextOutcome{Reply: "用法: /delete [task_id] [-f|--force]"}, nil
 	}
 
 	task, err := h.Tasks.GetTask(ctx, taskID)
