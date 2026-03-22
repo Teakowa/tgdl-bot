@@ -69,19 +69,20 @@ On startup, downloader also re-enqueues historical failed/dead-lettered tasks th
 
 ## Docker compose
 
-Use this file selection guide:
+Use split compose by environment:
 
-- Recommended production split deployment:
-  - `deploy/docker-compose.bot.yml`
-  - `deploy/docker-compose.downloader.yml`
-- Local/dev compose with locally built images:
-  - bot: `deploy/docker-compose.bot.yml` + `deploy/docker-compose.bot.build.yml`
-  - downloader: `deploy/docker-compose.downloader.yml` + `deploy/docker-compose.downloader.build.yml`
-- Compatibility single-host path (legacy style):
-  - `deploy/docker-compose.yml`
-  - optional local build override: `deploy/docker-compose.build.yml`
+- `prod` uses GHCR images (no build override).
+- `dev` uses local build images (with `*.build.yml` overrides).
+- Both environments support:
+  - `combined`: start `bot + downloader` in one command
+  - `single`: start `bot` and `downloader` separately
 
-For full step-by-step procedures (local dev/test, production rollout, scaling, and `tdl login` bootstrap), see [docs/DEPLOY.md](docs/DEPLOY.md).
+| Environment | Combined start | Single start |
+| --- | --- | --- |
+| `prod` | `docker compose -f deploy/docker-compose.bot.yml -f deploy/docker-compose.downloader.yml up -d` | `docker compose -f deploy/docker-compose.bot.yml up -d` and `docker compose -f deploy/docker-compose.downloader.yml up -d` |
+| `dev` | `docker compose -f deploy/docker-compose.bot.yml -f deploy/docker-compose.bot.build.yml -f deploy/docker-compose.downloader.yml -f deploy/docker-compose.downloader.build.yml up -d` | `docker compose -f deploy/docker-compose.bot.yml -f deploy/docker-compose.bot.build.yml up -d` and `docker compose -f deploy/docker-compose.downloader.yml -f deploy/docker-compose.downloader.build.yml up -d` |
+
+For full commands (`build`/`pull`/`up`), `tdl login` bootstrap, and scaling examples, see [docs/DEPLOY.md](docs/DEPLOY.md).
 
 ## Deployment notes
 
