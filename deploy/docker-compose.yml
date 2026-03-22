@@ -8,8 +8,11 @@ services:
       - ../.env
     environment:
       SQLITE_PATH: /app/data/tasks.db
+      TELEGRAM_WEBHOOK_LISTEN_ADDR: :8080
     volumes:
       - tgdl-data:/app/data
+    ports:
+      - "8080:8080"
     restart: unless-stopped
 
   downloader:

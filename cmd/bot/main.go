@@ -67,6 +67,8 @@ func run(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 		"env", cfg.Environment,
 		"telegram_api_base", cfg.Telegram.APIBase,
 		"webhook_enabled", cfg.Telegram.UseWebhook,
+		"webhook_configured", cfg.Telegram.WebhookURL != "",
+		"webhook_addr", cfg.Telegram.WebhookListenAddr,
 		"commands", []string{"/start", "/help", "/status", "/last"},
 		"allowlist_size", len(handler.AllowedUserIDs),
 	)
@@ -78,6 +80,10 @@ func run(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 		PollInterval:   1200 * time.Millisecond,
 		PollLimit:      50,
 		TimeoutSeconds: 30,
+		UseWebhook:     cfg.Telegram.UseWebhook,
+		WebhookURL:     cfg.Telegram.WebhookURL,
+		WebhookSecret:  cfg.Telegram.WebhookSecret,
+		WebhookAddr:    cfg.Telegram.WebhookListenAddr,
 	}
 	return runtime.Run(ctx)
 }

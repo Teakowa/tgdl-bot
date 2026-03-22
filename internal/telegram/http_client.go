@@ -71,10 +71,110 @@ func (c *HTTPClient) GetUpdates(ctx context.Context, req GetUpdatesRequest) (Get
 	if err := json.Unmarshal(body, &out); err != nil {
 		return GetUpdatesResponse{}, fmt.Errorf("telegram getUpdates decode: %w", err)
 	}
-	if !out.Ok && out.Error != nil {
-		return out, fmt.Errorf("telegram getUpdates api error: %d %s", out.Error.Code, out.Error.Message)
+	if !out.Ok {
+		return out, &APIRequestError{
+			Method:      "getUpdates",
+			Code:        out.ErrorCode,
+			Description: out.Description,
+		}
 	}
 	return out, nil
+}
+
+func (c *HTTPClient) SetWebhook(ctx context.Context, req SetWebhookRequest) error {
+	payload := map[string]any{
+		"url": req.URL,
+	}
+	if req.SecretToken != "" {
+		payload["secret_token"] = req.SecretToken
+	}
+	if len(req.AllowedUpdates) > 0 {
+		payload["allowed_updates"] = req.AllowedUpdates
+	}
+
+	b, err := json.Marshal(payload)
+	if err != nil {
+		return err
+	}
+
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.methodURL("setWebhook"), bytes.NewReader(b))
+	if err != nil {
+		return err
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.httpClient.Do(httpReq)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return err
+	}
+
+	var out struct {
+		Ok          bool   `json:"ok"`
+		ErrorCode   int    `json:"error_code,omitempty"`
+		Description string `json:"description,omitempty"`
+	}
+	if err := json.Unmarshal(body, &out); err != nil {
+		return fmt.Errorf("telegram setWebhook decode: %w", err)
+	}
+	if !out.Ok {
+		return &APIRequestError{
+			Method:      "setWebhook",
+			Code:        out.ErrorCode,
+			Description: out.Description,
+		}
+	}
+	return nil
+}
+
+func (c *HTTPClient) DeleteWebhook(ctx context.Context, req DeleteWebhookRequest) error {
+	payload := map[string]any{
+		"drop_pending_updates": req.DropPendingUpdates,
+	}
+
+	b, err := json.Marshal(payload)
+	if err != nil {
+		return err
+	}
+
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.methodURL("deleteWebhook"), bytes.NewReader(b))
+	if err != nil {
+		return err
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.httpClient.Do(httpReq)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return err
+	}
+
+	var out struct {
+		Ok          bool   `json:"ok"`
+		ErrorCode   int    `json:"error_code,omitempty"`
+		Description string `json:"description,omitempty"`
+	}
+	if err := json.Unmarshal(body, &out); err != nil {
+		return fmt.Errorf("telegram deleteWebhook decode: %w", err)
+	}
+	if !out.Ok {
+		return &APIRequestError{
+			Method:      "deleteWebhook",
+			Code:        out.ErrorCode,
+			Description: out.Description,
+		}
+	}
+	return nil
 }
 
 func (c *HTTPClient) SendMessage(ctx context.Context, req SendMessageRequest) (Message, error) {
@@ -115,15 +215,20 @@ func (c *HTTPClient) SendMessage(ctx context.Context, req SendMessageRequest) (M
 	}
 
 	var out struct {
-		Ok     bool      `json:"ok"`
-		Result Message   `json:"result"`
-		Error  *APIError `json:"error,omitempty"`
+		Ok          bool    `json:"ok"`
+		Result      Message `json:"result"`
+		ErrorCode   int     `json:"error_code,omitempty"`
+		Description string  `json:"description,omitempty"`
 	}
 	if err := json.Unmarshal(body, &out); err != nil {
 		return Message{}, fmt.Errorf("telegram sendMessage decode: %w", err)
 	}
-	if !out.Ok && out.Error != nil {
-		return Message{}, fmt.Errorf("telegram sendMessage api error: %d %s", out.Error.Code, out.Error.Message)
+	if !out.Ok {
+		return Message{}, &APIRequestError{
+			Method:      "sendMessage",
+			Code:        out.ErrorCode,
+			Description: out.Description,
+		}
 	}
 	return out.Result, nil
 }
@@ -172,7 +277,11 @@ func (c *HTTPClient) EditMessageText(ctx context.Context, req EditMessageTextReq
 		return fmt.Errorf("telegram editMessageText decode: %w", err)
 	}
 	if !out.Ok {
-		return fmt.Errorf("telegram editMessageText api error: %d %s", out.ErrorCode, out.Description)
+		return &APIRequestError{
+			Method:      "editMessageText",
+			Code:        out.ErrorCode,
+			Description: out.Description,
+		}
 	}
 	return nil
 }
@@ -219,7 +328,11 @@ func (c *HTTPClient) SetMessageReaction(ctx context.Context, req SetMessageReact
 		return fmt.Errorf("telegram setMessageReaction decode: %w", err)
 	}
 	if !out.Ok {
-		return fmt.Errorf("telegram setMessageReaction api error: %d %s", out.ErrorCode, out.Description)
+		return &APIRequestError{
+			Method:      "setMessageReaction",
+			Code:        out.ErrorCode,
+			Description: out.Description,
+		}
 	}
 	return nil
 }

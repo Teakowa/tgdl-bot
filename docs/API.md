@@ -8,9 +8,10 @@ Phase 1 forwarding scope only.
 
 Used by the bot service to:
 
-- receive updates
+- receive updates via webhook or `getUpdates`
 - reply to users (with `reply_to_message_id` to quote the original message)
 - send task completion or failure notifications
+- manage webhook lifecycle via `setWebhook` and `deleteWebhook`
 
 ### Cloudflare Queues HTTP API
 
@@ -68,6 +69,10 @@ Used by the downloader service to perform message forward work.
 ## Phase 1 behavior summary
 
 - Bot accepts Telegram URLs only.
+- Bot prefers webhook mode when `TELEGRAM_USE_WEBHOOK=true` and `TELEGRAM_WEBHOOK_URL` is set.
+- Polling mode always calls `deleteWebhook(drop_pending_updates=false)` before `getUpdates`.
+- Polling mode auto-recovers Telegram webhook conflicts (`error_code=409`) by reissuing `deleteWebhook`.
+- Webhook requests are accepted only via `POST` and validated with `X-Telegram-Bot-Api-Secret-Token`.
 - Bot persists a queued forward task before enqueueing to Cloudflare Queue.
 - Downloader performs session preflight before pulling tasks.
 - Downloader startup re-enqueues failed/dead-lettered tasks still below retry cap.

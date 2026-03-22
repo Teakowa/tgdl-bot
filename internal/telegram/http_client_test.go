@@ -3,6 +3,7 @@ package telegram
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -146,5 +147,106 @@ func TestSendMessageIncludesReplyToMessageID(t *testing.T) {
 
 	if int(captured["reply_to_message_id"].(float64)) != 42 {
 		t.Fatalf("unexpected reply_to_message_id: %v", captured["reply_to_message_id"])
+	}
+}
+
+func TestSetWebhookSendsExpectedPayload(t *testing.T) {
+	var capturedPath string
+	var captured map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		capturedPath = r.URL.Path
+		defer r.Body.Close()
+		if err := json.NewDecoder(r.Body).Decode(&captured); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"ok":true,"result":true}`))
+	}))
+	defer server.Close()
+
+	client := NewHTTPClient(server.URL, "token", time.Second)
+	err := client.SetWebhook(context.Background(), SetWebhookRequest{
+		URL:            "https://example.com/hook",
+		SecretToken:    "secret",
+		AllowedUpdates: []string{"message"},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if capturedPath != "/bottoken/setWebhook" {
+		t.Fatalf("unexpected path: %s", capturedPath)
+	}
+	if captured["url"] != "https://example.com/hook" {
+		t.Fatalf("unexpected webhook url: %v", captured["url"])
+	}
+	if captured["secret_token"] != "secret" {
+		t.Fatalf("unexpected secret token: %v", captured["secret_token"])
+	}
+	allowed, ok := captured["allowed_updates"].([]any)
+	if !ok || len(allowed) != 1 || allowed[0] != "message" {
+		t.Fatalf("unexpected allowed updates: %v", captured["allowed_updates"])
+	}
+}
+
+func TestDeleteWebhookSendsDropPendingFlag(t *testing.T) {
+	var capturedPath string
+	var captured map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		capturedPath = r.URL.Path
+		defer r.Body.Close()
+		if err := json.NewDecoder(r.Body).Decode(&captured); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"ok":true,"result":true}`))
+	}))
+	defer server.Close()
+
+	client := NewHTTPClient(server.URL, "token", time.Second)
+	err := client.DeleteWebhook(context.Background(), DeleteWebhookRequest{
+		DropPendingUpdates: false,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if capturedPath != "/bottoken/deleteWebhook" {
+		t.Fatalf("unexpected path: %s", capturedPath)
+	}
+	dropPending, ok := captured["drop_pending_updates"].(bool)
+	if !ok {
+		t.Fatalf("expected bool drop_pending_updates, got %T", captured["drop_pending_updates"])
+	}
+	if dropPending {
+		t.Fatalf("expected drop_pending_updates=false, got true")
+	}
+}
+
+func TestGetUpdatesReturnsTypedAPIError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"ok":false,"error_code":409,"description":"Conflict: webhook active"}`))
+	}))
+	defer server.Close()
+
+	client := NewHTTPClient(server.URL, "token", time.Second)
+	_, err := client.GetUpdates(context.Background(), GetUpdatesRequest{
+		Limit:          1,
+		TimeoutSeconds: 1,
+	})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+
+	var apiErr *APIRequestError
+	if !errors.As(err, &apiErr) {
+		t.Fatalf("expected APIRequestError, got %T", err)
+	}
+	if apiErr.Code != 409 {
+		t.Fatalf("expected code 409, got %d", apiErr.Code)
+	}
+	if !IsAPIErrorCode(err, ErrorCodeConflict) {
+		t.Fatal("expected IsAPIErrorCode to match conflict code")
 	}
 }

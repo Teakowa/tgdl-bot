@@ -11,6 +11,7 @@ import (
 
 const (
 	defaultTelegramAPIBase          = "https://api.telegram.org"
+	defaultWebhookListenAddr        = ":8080"
 	defaultCloudflareQueueBatchSize = 5
 	defaultQueueVisibilityTimeoutMS = 15 * 60 * 1000
 	defaultQueuePullIntervalMS      = 3000
@@ -34,11 +35,13 @@ type Config struct {
 }
 
 type TelegramConfig struct {
-	BotToken       string
-	APIBase        string
-	UseWebhook     bool
-	WebhookURL     string
-	AllowedUserIDs []int64
+	BotToken          string
+	APIBase           string
+	UseWebhook        bool
+	WebhookURL        string
+	WebhookSecret     string
+	WebhookListenAddr string
+	AllowedUserIDs    []int64
 }
 
 type CloudflareConfig struct {
@@ -71,10 +74,12 @@ func Load() (Config, error) {
 		Environment: getEnvOrDefault("ENV", defaultEnvironment),
 		LogLevel:    getEnvOrDefault("LOG_LEVEL", defaultLogLevel),
 		Telegram: TelegramConfig{
-			BotToken:   strings.TrimSpace(os.Getenv("TELEGRAM_BOT_TOKEN")),
-			APIBase:    normalizeURL(getEnvOrDefault("TELEGRAM_API_BASE", defaultTelegramAPIBase)),
-			UseWebhook: getBoolEnv("TELEGRAM_USE_WEBHOOK", false),
-			WebhookURL: strings.TrimSpace(os.Getenv("TELEGRAM_WEBHOOK_URL")),
+			BotToken:          strings.TrimSpace(os.Getenv("TELEGRAM_BOT_TOKEN")),
+			APIBase:           normalizeURL(getEnvOrDefault("TELEGRAM_API_BASE", defaultTelegramAPIBase)),
+			UseWebhook:        getBoolEnv("TELEGRAM_USE_WEBHOOK", false),
+			WebhookURL:        strings.TrimSpace(os.Getenv("TELEGRAM_WEBHOOK_URL")),
+			WebhookSecret:     strings.TrimSpace(os.Getenv("TELEGRAM_WEBHOOK_SECRET")),
+			WebhookListenAddr: strings.TrimSpace(getEnvOrDefault("TELEGRAM_WEBHOOK_LISTEN_ADDR", defaultWebhookListenAddr)),
 		},
 		Cloudflare: CloudflareConfig{
 			AccountID:                strings.TrimSpace(os.Getenv("CF_ACCOUNT_ID")),
@@ -106,8 +111,12 @@ func Load() (Config, error) {
 	validateRequired(&errs, "CF_QUEUE_ID", cfg.Cloudflare.QueueID)
 	validateRequired(&errs, "CF_API_TOKEN", cfg.Cloudflare.APIToken)
 
-	if cfg.Telegram.UseWebhook && cfg.Telegram.WebhookURL == "" {
-		errs = append(errs, fmt.Errorf("TELEGRAM_WEBHOOK_URL is required when TELEGRAM_USE_WEBHOOK is true"))
+	webhookMode := cfg.Telegram.UseWebhook && cfg.Telegram.WebhookURL != ""
+	if webhookMode && cfg.Telegram.WebhookSecret == "" {
+		errs = append(errs, fmt.Errorf("TELEGRAM_WEBHOOK_SECRET is required when webhook mode is enabled"))
+	}
+	if webhookMode && cfg.Telegram.WebhookListenAddr == "" {
+		errs = append(errs, fmt.Errorf("TELEGRAM_WEBHOOK_LISTEN_ADDR is required when webhook mode is enabled"))
 	}
 	if cfg.Cloudflare.QueueBatchSize <= 0 {
 		errs = append(errs, fmt.Errorf("CF_QUEUE_BATCH_SIZE must be greater than zero"))

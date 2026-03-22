@@ -87,3 +87,5 @@ Run `tdl login` on the target machine before starting the downloader service.
 
 - Forward target defaults to the sender's Telegram user/chat context.
 - Bot does not expose interactive login or arbitrary destination forwarding in this phase.
+- Bot prefers webhook mode when configured, and otherwise falls back to long polling.
+- Polling mode deletes outgoing webhook before `getUpdates` to satisfy Telegram API mutual exclusion.

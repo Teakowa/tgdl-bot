@@ -45,6 +45,14 @@ cp .env.example .env
 ```
 
 The bot service reads Telegram, queue, storage, and runtime settings from the environment.
+Runtime mode selection:
+
+- Webhook mode: `TELEGRAM_USE_WEBHOOK=true` and `TELEGRAM_WEBHOOK_URL` is set.
+- Polling fallback: all other cases.
+
+Important Telegram constraint: as long as an outgoing webhook exists, `getUpdates` does not receive updates.
+To keep polling safe, bot startup always calls `deleteWebhook` with `drop_pending_updates=false`.
+If Telegram returns polling conflict (`error_code=409`), bot auto-recovers by deleting webhook and retrying polling.
 
 ### 3. Run the downloader
 
@@ -96,3 +104,4 @@ This login state is persisted in Docker volumes (`tgdl-data` and `tgdl-tdl-sessi
 - SQLite is used as the local task store; keep the database on persistent storage.
 - This phase does not include a web UI, object storage, or worker-based deployment.
 - Bot accepts Telegram message URLs only and creates forward tasks.
+- In webhook mode, route HTTPS traffic to bot listen address (`TELEGRAM_WEBHOOK_LISTEN_ADDR`, default `:8080`) and configure `TELEGRAM_WEBHOOK_SECRET`.
