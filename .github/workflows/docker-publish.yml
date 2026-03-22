@@ -8,6 +8,7 @@ on:
       - "v*"
     paths-ignore:
       - README.md
+      - CHANGELOG.md
       - docs/**
       - .env.example
   pull_request:
@@ -15,6 +16,7 @@ on:
       - main
     paths-ignore:
       - README.md
+      - CHANGELOG.md
       - docs/**
       - .env.example
   workflow_dispatch:
