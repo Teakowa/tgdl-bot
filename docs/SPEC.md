@@ -81,6 +81,9 @@ Current forwarding scope for TGDL Bot.
 - `/forward --drop-caption` uses `tdl forward --mode clone --edit '""'`.
 - Bot does not expose interactive login.
 - Bot prefers webhook mode when configured, and otherwise falls back to long polling.
+- Bot always starts an HTTP server on `TELEGRAM_WEBHOOK_LISTEN_ADDR`.
+- `GET /ping` is reserved for liveness checks.
+- `POST /webhook` is the Telegram ingress route when webhook mode is enabled.
 - Polling mode deletes outgoing webhook before `getUpdates` to satisfy Telegram API mutual exclusion.
 - Polling conflict recovery retries after deleting webhook with `drop_pending_updates=false`.
 - Queue split is required: `CF_QUEUE_ID` (task queue) and `CF_STATUS_QUEUE_ID` (status queue) must be different values.

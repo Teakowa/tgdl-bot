@@ -59,6 +59,13 @@ Runtime mode selection:
 - Webhook mode: `TELEGRAM_USE_WEBHOOK=true` and `TELEGRAM_WEBHOOK_URL` is set.
 - Polling fallback: all other cases.
 
+Bot also always exposes a small HTTP interface on `TELEGRAM_WEBHOOK_LISTEN_ADDR`:
+
+- `GET /ping` for external liveness probes
+- `POST /webhook` for Telegram webhook delivery when webhook mode is enabled
+
+`/ping` is a liveness check only. It does not verify D1, Queue, or Telegram API readiness.
+
 Important Telegram constraint: as long as an outgoing webhook exists, `getUpdates` does not receive updates.
 To keep polling safe, bot startup always calls `deleteWebhook` with `drop_pending_updates=false`.
 If Telegram returns polling conflict (`error_code=409`), bot auto-recovers by deleting webhook and retrying polling.
@@ -169,5 +176,7 @@ Container image publication remains tag-driven: when the release workflow create
 - Task execution timeout defaults to 3 hours (`TASK_TIMEOUT_MINUTES=180`); timeout tasks are marked failed and removed from queue.
 - This system does not include a web UI, object storage, or worker-based deployment.
 - Bot accepts Telegram message URLs directly and also supports `/forward <source_url> <target> [--drop-caption]`.
-- In webhook mode, route HTTPS traffic to bot listen address (`TELEGRAM_WEBHOOK_LISTEN_ADDR`, default `:8080`) and configure `TELEGRAM_WEBHOOK_SECRET`.
+- Bot always binds HTTP on `TELEGRAM_WEBHOOK_LISTEN_ADDR` (default `:8080`) for `/ping`.
+- In webhook mode, route HTTPS traffic for `/webhook` to that same listen address and configure `TELEGRAM_WEBHOOK_SECRET`.
+- External monitoring should probe `GET /ping`.
 - Local scripts and `dev` compose read `.env`; `prod` compose reads only exported or injected environment variables.

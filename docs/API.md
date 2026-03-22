@@ -13,6 +13,13 @@ Used by the bot service to:
 - sync task status messages and source message reactions
 - manage webhook lifecycle via `setWebhook` and `deleteWebhook`
 
+### Bot HTTP interface
+
+Used by the bot service to expose operational and webhook ingress endpoints:
+
+- `GET /ping`: unauthenticated liveness probe
+- `POST /webhook`: Telegram webhook ingress endpoint when webhook mode is enabled
+
 ### Cloudflare Queues HTTP API
 
 Used by both services with two queues:
@@ -116,7 +123,9 @@ Public queue-processing flow currently uses:
 - Bot prefers webhook mode when `TELEGRAM_USE_WEBHOOK=true` and `TELEGRAM_WEBHOOK_URL` is set.
 - Polling mode always calls `deleteWebhook(drop_pending_updates=false)` before `getUpdates`.
 - Polling mode auto-recovers Telegram webhook conflicts (`error_code=409`) by reissuing `deleteWebhook`.
-- Webhook requests are accepted only via `POST` and validated with `X-Telegram-Bot-Api-Secret-Token`.
+- Bot always binds an HTTP server on `TELEGRAM_WEBHOOK_LISTEN_ADDR`.
+- `GET /ping` returns `200 OK` for liveness checks only; it does not validate downstream dependencies.
+- Webhook requests are accepted only on `POST /webhook` and validated with `X-Telegram-Bot-Api-Secret-Token`.
 - Bot persists a queued forward task in D1 before enqueueing to Cloudflare Queue.
 - Bot consumes status queue messages, fetches the latest task state from D1, and updates Telegram status/reaction.
 - Downloader performs session preflight before pulling tasks.

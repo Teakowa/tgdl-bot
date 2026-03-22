@@ -160,6 +160,8 @@ docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.build.yml c
 
 ## Operational notes
 
+- Bot always exposes `GET /ping` on `TELEGRAM_WEBHOOK_LISTEN_ADDR` for external liveness monitoring.
+- In webhook mode, route external HTTPS traffic for `POST /webhook` to the same bot listen address and keep `TELEGRAM_WEBHOOK_URL` aligned with that public webhook URL.
 - Downloader performs startup preflight before queue consumption and requires a ready `tdl` session when login checks are enabled.
 - `tdl` session state is persisted in `tgdl-tdl-session` mounted at `/root/.tdl`.
 - The current deployment supports one active downloader per `TDL_NAMESPACE`/storage only. Atomic task claim prevents duplicate queue ownership, but it does not make `tdl` multi-process safe.

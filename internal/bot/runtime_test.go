@@ -364,13 +364,15 @@ func TestRuntimeWebhookHandlerRejectsWrongSecret(t *testing.T) {
 	runtime := Runtime{
 		Client:        &fakeTelegramClient{},
 		Handler:       Handler{},
+		UseWebhook:    true,
+		WebhookURL:    "https://example.com/webhook",
 		WebhookSecret: "correct-secret",
 	}
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/webhook", bytes.NewReader([]byte(`{}`)))
 	req.Header.Set(telegram.WebhookSecretHeader, "wrong-secret")
-	runtime.webhookHandler().ServeHTTP(rec, req)
+	runtime.httpHandler().ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusUnauthorized {
 		t.Fatalf("expected 401, got %d", rec.Code)
@@ -382,6 +384,8 @@ func TestRuntimeWebhookHandlerProcessesUpdate(t *testing.T) {
 	runtime := Runtime{
 		Client:        client,
 		Handler:       Handler{},
+		UseWebhook:    true,
+		WebhookURL:    "https://example.com/webhook",
 		WebhookSecret: "correct-secret",
 	}
 
@@ -402,7 +406,7 @@ func TestRuntimeWebhookHandlerProcessesUpdate(t *testing.T) {
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/webhook", bytes.NewReader(b))
 	req.Header.Set(telegram.WebhookSecretHeader, "correct-secret")
-	runtime.webhookHandler().ServeHTTP(rec, req)
+	runtime.httpHandler().ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d", rec.Code)
@@ -457,6 +461,83 @@ func TestRuntimeAnswersCallbackQuery(t *testing.T) {
 	}
 	if client.answeredCallbacks[0].CallbackQueryID != "cb-1" {
 		t.Fatalf("unexpected callback query id: %+v", client.answeredCallbacks[0])
+	}
+}
+
+func TestRuntimePingHandlerRespondsOK(t *testing.T) {
+	runtime := Runtime{}
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/ping", nil)
+	runtime.httpHandler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rec.Code)
+	}
+	if body := rec.Body.String(); body != "ok" {
+		t.Fatalf("expected ping body ok, got %q", body)
+	}
+}
+
+func TestRuntimePingHandlerRejectsWrongMethod(t *testing.T) {
+	runtime := Runtime{}
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/ping", nil)
+	runtime.httpHandler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("expected 405, got %d", rec.Code)
+	}
+}
+
+func TestRuntimeWebhookHandlerRejectsWrongMethod(t *testing.T) {
+	runtime := Runtime{
+		UseWebhook: true,
+		WebhookURL: "https://example.com/webhook",
+	}
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/webhook", nil)
+	runtime.httpHandler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("expected 405, got %d", rec.Code)
+	}
+}
+
+func TestRuntimeHTTPHandlerReturnsNotFoundForUnknownPath(t *testing.T) {
+	runtime := Runtime{}
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/unknown", nil)
+	runtime.httpHandler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("expected 404, got %d", rec.Code)
+	}
+}
+
+func TestRuntimePollingModeStartsHTTPServer(t *testing.T) {
+	client := &fakeTelegramClient{}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+
+	runtime := Runtime{
+		Client:         client,
+		Handler:        Handler{},
+		PollInterval:   time.Millisecond,
+		PollLimit:      1,
+		TimeoutSeconds: 1,
+		WebhookAddr:    "127.0.0.1:0",
+	}
+
+	err := runtime.Run(ctx)
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("expected context deadline exceeded, got %v", err)
+	}
+	if len(client.deleteWebhookReqs) == 0 {
+		t.Fatal("expected polling mode to call deleteWebhook while http server is running")
 	}
 }
 

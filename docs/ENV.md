@@ -7,9 +7,9 @@ All configuration is read from environment variables.
 - `TELEGRAM_BOT_TOKEN`: required for bot service, not required for downloader service
 - `TELEGRAM_API_BASE`: optional API base URL, defaults to the official Telegram API
 - `TELEGRAM_USE_WEBHOOK`: optional boolean, defaults to `false`
-- `TELEGRAM_WEBHOOK_URL`: optional webhook URL. Bot enters webhook mode only when this value is set and `TELEGRAM_USE_WEBHOOK=true`; otherwise it falls back to long polling.
+- `TELEGRAM_WEBHOOK_URL`: optional webhook URL. Bot enters webhook mode only when this value is set and `TELEGRAM_USE_WEBHOOK=true`; otherwise it falls back to long polling. When set, it should point to the externally reachable `/webhook` endpoint.
 - `TELEGRAM_WEBHOOK_SECRET`: required when webhook mode is enabled, checked against `X-Telegram-Bot-Api-Secret-Token`
-- `TELEGRAM_WEBHOOK_LISTEN_ADDR`: optional listen address for webhook HTTP server, defaults to `:8080`
+- `TELEGRAM_WEBHOOK_LISTEN_ADDR`: optional bot HTTP listen address, defaults to `:8080`; serves both `GET /ping` and `POST /webhook`
 - `TELEGRAM_ALLOWED_USER_IDS`: optional comma-separated allowlist of Telegram user IDs
 
 Bot-only variables:
@@ -71,6 +71,9 @@ Downloader-only variables:
 The current deployment assumes:
 
 - webhook mode only when both `TELEGRAM_USE_WEBHOOK=true` and `TELEGRAM_WEBHOOK_URL` is set; otherwise long polling
+- bot always starts an HTTP server on `TELEGRAM_WEBHOOK_LISTEN_ADDR`
+- `GET /ping` is a liveness probe only and does not verify D1, Queue, or Telegram API reachability
+- `POST /webhook` is the Telegram ingress route when webhook mode is enabled
 - polling mode deletes outgoing webhook (`drop_pending_updates=false`) before reading updates
 - polling conflict recovery automatically retries after deleting webhook on Telegram API conflict (`error_code=409`)
 - D1 is the single task store for bot and downloader

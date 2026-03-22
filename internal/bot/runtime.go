@@ -46,20 +46,24 @@ func (r Runtime) Run(ctx context.Context) error {
 	if r.Client == nil {
 		return errors.New("bot runtime: telegram client is required")
 	}
-	if !r.statusSyncEnabled() {
-		if r.useWebhookMode() {
-			return r.runWebhook(ctx)
-		}
-		return r.runPolling(ctx)
-	}
 
 	runCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	errCh := make(chan error, 2)
+	workers := 2
+	if r.statusSyncEnabled() {
+		workers++
+	}
+
+	errCh := make(chan error, workers)
 	go func() {
-		errCh <- r.runStatusSync(runCtx)
+		errCh <- r.runHTTPServer(runCtx)
 	}()
+	if r.statusSyncEnabled() {
+		go func() {
+			errCh <- r.runStatusSync(runCtx)
+		}()
+	}
 	go func() {
 		if r.useWebhookMode() {
 			errCh <- r.runWebhook(runCtx)
@@ -68,10 +72,14 @@ func (r Runtime) Run(ctx context.Context) error {
 		errCh <- r.runPolling(runCtx)
 	}()
 
+	errs := make([]error, 0, workers)
 	firstErr := <-errCh
+	errs = append(errs, firstErr)
 	cancel()
-	secondErr := <-errCh
-	return chooseRunError(firstErr, secondErr)
+	for len(errs) < workers {
+		errs = append(errs, <-errCh)
+	}
+	return chooseRunError(errs...)
 }
 
 func (r Runtime) runPolling(ctx context.Context) error {
@@ -142,6 +150,11 @@ func (r Runtime) runWebhook(ctx context.Context) error {
 		return fmt.Errorf("bot runtime: setWebhook failed: %w", err)
 	}
 
+	<-ctx.Done()
+	return ctx.Err()
+}
+
+func (r Runtime) runHTTPServer(ctx context.Context) error {
 	addr := strings.TrimSpace(r.WebhookAddr)
 	if addr == "" {
 		addr = ":8080"
@@ -149,7 +162,7 @@ func (r Runtime) runWebhook(ctx context.Context) error {
 
 	server := &http.Server{
 		Addr:    addr,
-		Handler: r.webhookHandler(),
+		Handler: r.httpHandler(),
 	}
 	errCh := make(chan error, 1)
 	go func() {
@@ -168,32 +181,50 @@ func (r Runtime) runWebhook(ctx context.Context) error {
 		return ctx.Err()
 	case err, ok := <-errCh:
 		if ok && err != nil {
-			return fmt.Errorf("bot runtime: webhook server failed: %w", err)
+			return fmt.Errorf("bot runtime: http server failed: %w", err)
 		}
 		return nil
 	}
 }
 
-func (r Runtime) webhookHandler() http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-		if req.Method != http.MethodPost {
-			w.WriteHeader(http.StatusMethodNotAllowed)
-			return
-		}
-		if req.Header.Get(telegram.WebhookSecretHeader) != strings.TrimSpace(r.WebhookSecret) {
-			w.WriteHeader(http.StatusUnauthorized)
-			return
-		}
+func (r Runtime) httpHandler() http.Handler {
+	mux := http.NewServeMux()
+	mux.Handle("/ping", http.HandlerFunc(r.handlePing))
+	mux.Handle("/webhook", http.HandlerFunc(r.handleWebhook))
+	return mux
+}
 
-		defer req.Body.Close()
-		var update telegram.Update
-		if err := json.NewDecoder(req.Body).Decode(&update); err != nil {
-			w.WriteHeader(http.StatusBadRequest)
-			return
-		}
-		r.processUpdate(req.Context(), update)
-		w.WriteHeader(http.StatusOK)
-	})
+func (r Runtime) handlePing(w http.ResponseWriter, req *http.Request) {
+	if req.Method != http.MethodGet {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	_, _ = w.Write([]byte("ok"))
+}
+
+func (r Runtime) handleWebhook(w http.ResponseWriter, req *http.Request) {
+	if !r.useWebhookMode() {
+		http.NotFound(w, req)
+		return
+	}
+	if req.Method != http.MethodPost {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+	if req.Header.Get(telegram.WebhookSecretHeader) != strings.TrimSpace(r.WebhookSecret) {
+		w.WriteHeader(http.StatusUnauthorized)
+		return
+	}
+
+	defer req.Body.Close()
+	var update telegram.Update
+	if err := json.NewDecoder(req.Body).Decode(&update); err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+	r.processUpdate(req.Context(), update)
+	w.WriteHeader(http.StatusOK)
 }
 
 func (r Runtime) processUpdate(ctx context.Context, update telegram.Update) {
@@ -341,8 +372,8 @@ func shouldRetryStatusNotify(err error) bool {
 	return true
 }
 
-func chooseRunError(firstErr, secondErr error) error {
-	for _, candidate := range []error{firstErr, secondErr} {
+func chooseRunError(errs ...error) error {
+	for _, candidate := range errs {
 		if candidate == nil {
 			continue
 		}
@@ -351,10 +382,12 @@ func chooseRunError(firstErr, secondErr error) error {
 		}
 		return candidate
 	}
-	if firstErr != nil {
-		return firstErr
+	for _, err := range errs {
+		if err != nil {
+			return err
+		}
 	}
-	return secondErr
+	return nil
 }
 
 func (r Runtime) bindAndSyncTaskStatus(ctx context.Context, outcome *UpdateOutcome, sentMessage telegram.Message) {
