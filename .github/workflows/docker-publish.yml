@@ -42,7 +42,7 @@ jobs:
 
       - name: Docker metadata (bot)
         id: meta_bot
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@v6
         with:
           images: ghcr.io/${{ steps.owner.outputs.value }}/tgdl-bot
           tags: |
@@ -54,7 +54,7 @@ jobs:
 
       - name: Docker metadata (downloader)
         id: meta_downloader
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@v6
         with:
           images: ghcr.io/${{ steps.owner.outputs.value }}/tgdl-downloader
           tags: |
