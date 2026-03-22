@@ -15,6 +15,7 @@ type TaskRepository interface {
 	Update(ctx context.Context, task service.Task) error
 	FindByID(ctx context.Context, taskID string) (service.Task, error)
 	FindByIdempotencyKey(ctx context.Context, idempotencyKey string) (service.Task, error)
+	ListFailedForRetry(ctx context.Context, maxRetryCount int, limit int) ([]service.Task, error)
 	DeleteFailedByIdempotencyKey(ctx context.Context, idempotencyKey string) (int64, error)
 	ListRecentByUser(ctx context.Context, userID int64, limit int) ([]service.Task, error)
 }
@@ -135,6 +136,55 @@ func (r *SQLiteTaskRepository) FindByIdempotencyKey(ctx context.Context, idempot
 		return service.Task{}, fmt.Errorf("storage: find task by idempotency key %q: %w", idempotencyKey, err)
 	}
 	return task, nil
+}
+
+func (r *SQLiteTaskRepository) ListFailedForRetry(ctx context.Context, maxRetryCount int, limit int) ([]service.Task, error) {
+	if r == nil || r.DB == nil {
+		return nil, errors.New("storage: nil task repository")
+	}
+	if maxRetryCount <= 0 {
+		return nil, errors.New("storage: max retry count must be greater than zero")
+	}
+	if limit <= 0 {
+		limit = 100
+	}
+
+	rows, err := r.DB.QueryContext(ctx, `
+		SELECT task_id, chat_id, user_id, target_chat_id, url, status, idempotency_key,
+		       retry_count, lease_id, output_summary, error_message, exit_code,
+		       created_at, updated_at, started_at, finished_at
+		FROM tasks
+		WHERE status IN (?, ?)
+		  AND retry_count < ?
+		ORDER BY updated_at ASC
+		LIMIT ?`,
+		string(service.StatusFailed),
+		string(service.StatusDeadLettered),
+		maxRetryCount,
+		limit,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("storage: list failed tasks for retry: %w", err)
+	}
+	defer rows.Close()
+
+	tasks := make([]service.Task, 0, limit)
+	for rows.Next() {
+		var row TaskRow
+		if err := rows.Scan(
+			&row.TaskID, &row.ChatID, &row.UserID, &row.TargetChatID, &row.URL, &row.Status, &row.IdempotencyKey,
+			&row.RetryCount, &row.LeaseID, &row.OutputSummary, &row.ErrorMessage, &row.ExitCode,
+			&row.CreatedAt, &row.UpdatedAt, &row.StartedAt, &row.FinishedAt,
+		); err != nil {
+			return nil, fmt.Errorf("storage: scan failed retry task row: %w", err)
+		}
+		tasks = append(tasks, fromRow(row))
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("storage: iterate failed retry task rows: %w", err)
+	}
+
+	return tasks, nil
 }
 
 func (r *SQLiteTaskRepository) DeleteFailedByIdempotencyKey(ctx context.Context, idempotencyKey string) (int64, error) {

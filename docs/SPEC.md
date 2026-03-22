@@ -67,6 +67,7 @@ Phase 1 forwarding scope for TGDL Bot.
 6. Execute `tdl` forward
 7. Persist result
 8. Ack success or retry/fail according to error type
+9. On service startup, re-enqueue failed/dead-lettered tasks that still have retry budget
 
 ## `tdl` invocation requirements
 
@@ -75,6 +76,7 @@ Phase 1 forwarding scope for TGDL Bot.
 - Capture stdout and stderr
 - Enforce timeout
 - Kill the process on timeout
+- Timeout failures are treated as final `failed` tasks and acked out of queue
 
 ## Deployment prerequisite
 

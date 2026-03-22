@@ -50,9 +50,14 @@ func TestRun_PreflightFailureSkipsLoop(t *testing.T) {
 type fakeQueue struct {
 	acked   []string
 	retried []string
+	enqueued []queue.Message
 }
 
 func (q *fakeQueue) Pull(context.Context, int, int) ([]queue.ReceivedMessage, error) { return nil, nil }
+func (q *fakeQueue) Enqueue(_ context.Context, message queue.Message) error {
+	q.enqueued = append(q.enqueued, message)
+	return nil
+}
 func (q *fakeQueue) Ack(_ context.Context, leaseIDs []string) error {
 	q.acked = append(q.acked, leaseIDs...)
 	return nil
@@ -63,14 +68,18 @@ func (q *fakeQueue) Retry(_ context.Context, leaseIDs []string) error {
 }
 
 type fakeTasks struct {
-	task    service.Task
-	updates []service.TaskUpdate
+	task           service.Task
+	updates        []service.TaskUpdate
+	failedForRetry []service.Task
 }
 
 func (f *fakeTasks) GetTask(context.Context, string) (service.Task, error) { return f.task, nil }
 func (f *fakeTasks) UpdateTask(_ context.Context, _ string, update service.TaskUpdate) error {
 	f.updates = append(f.updates, update)
 	return nil
+}
+func (f *fakeTasks) ListFailedTasksForRetry(context.Context, int, int) ([]service.Task, error) {
+	return f.failedForRetry, nil
 }
 
 type fakeRunnerImpl struct {
@@ -246,8 +255,8 @@ func TestClassifyTDLErrorTimeoutAndKeyword(t *testing.T) {
 		defer cancel()
 		time.Sleep(2 * time.Millisecond)
 		got := classifyTDLError(runCtx, dl.RunResult{}, errors.New("exit status 1"))
-		if got != dl.ErrorClassRetryable {
-			t.Fatalf("expected retryable, got %s", got)
+		if got != dl.ErrorClassNonRetryable {
+			t.Fatalf("expected non_retryable, got %s", got)
 		}
 	})
 
@@ -283,6 +292,52 @@ func TestTransientKeywordsContainEOF(t *testing.T) {
 	joined := strings.Join(transientErrorKeywords, ",")
 	if !strings.Contains(joined, "eof") {
 		t.Fatalf("expected eof keyword in transient keyword list, got %s", joined)
+	}
+}
+
+func TestQueuePullLoopRunRequeuesFailedTasksOnStartup(t *testing.T) {
+	q := &fakeQueue{}
+	tasks := &fakeTasks{
+		failedForRetry: []service.Task{
+			{
+				TaskID:         "retry-task",
+				ChatID:         1,
+				UserID:         2,
+				TargetChatID:   3,
+				URL:            "https://t.me/c/1/2",
+				IdempotencyKey: "idem-1",
+				RetryCount:     1,
+				Status:         service.StatusFailed,
+			},
+		},
+	}
+
+	loop := queuePullLoop{
+		logger:      slog.Default(),
+		queue:       q,
+		tasks:       tasks,
+		runner:      fakeRunnerImpl{build: func(context.Context, dl.DownloadRequest) (*exec.Cmd, error) { return nil, errors.New("unused") }},
+		maxAttempts: 3,
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	_ = loop.Run(ctx, config.Config{
+		Cloudflare: config.CloudflareConfig{
+			QueuePullIntervalMS: 10,
+			QueueBatchSize:      1,
+		},
+		Downloader: config.DownloaderConfig{
+			Workers: 1,
+		},
+	})
+
+	if len(q.enqueued) != 1 || q.enqueued[0].TaskID != "retry-task" {
+		t.Fatalf("expected startup retry enqueue, got %+v", q.enqueued)
+	}
+	if len(tasks.updates) != 1 || tasks.updates[0].Status != service.StatusRetrying {
+		t.Fatalf("expected retrying status update, got %+v", tasks.updates)
 	}
 }
 

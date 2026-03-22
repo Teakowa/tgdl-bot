@@ -18,6 +18,8 @@ type fakeRepo struct {
 	deleteErr      error
 	listRecentResp []Task
 	listRecentErr  error
+	listFailedResp []Task
+	listFailedErr  error
 }
 
 func (r *fakeRepo) Create(_ context.Context, task Task) error {
@@ -79,6 +81,13 @@ func (r *fakeRepo) ListRecentByUser(context.Context, int64, int) ([]Task, error)
 		return nil, r.listRecentErr
 	}
 	return r.listRecentResp, nil
+}
+
+func (r *fakeRepo) ListFailedForRetry(context.Context, int, int) ([]Task, error) {
+	if r.listFailedErr != nil {
+		return nil, r.listFailedErr
+	}
+	return r.listFailedResp, nil
 }
 
 func (r *fakeRepo) DeleteFailedByIdempotencyKey(_ context.Context, _ string) (int64, error) {
@@ -148,5 +157,19 @@ func TestDeleteFailedByIdempotencyKey(t *testing.T) {
 	}
 	if rows != 2 {
 		t.Fatalf("expected 2 deleted rows, got %d", rows)
+	}
+}
+
+func TestListFailedTasksForRetry(t *testing.T) {
+	svc := NewTaskService(&fakeRepo{
+		listFailedResp: []Task{{TaskID: "t1", Status: StatusFailed}},
+	})
+
+	tasks, err := svc.ListFailedTasksForRetry(context.Background(), 3, 10)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(tasks) != 1 || tasks[0].TaskID != "t1" {
+		t.Fatalf("unexpected tasks: %+v", tasks)
 	}
 }

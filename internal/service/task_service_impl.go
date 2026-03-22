@@ -15,6 +15,7 @@ type TaskRepository interface {
 	Update(ctx context.Context, task Task) error
 	FindByID(ctx context.Context, taskID string) (Task, error)
 	FindByIdempotencyKey(ctx context.Context, idempotencyKey string) (Task, error)
+	ListFailedForRetry(ctx context.Context, maxRetryCount int, limit int) ([]Task, error)
 	DeleteFailedByIdempotencyKey(ctx context.Context, idempotencyKey string) (int64, error)
 	ListRecentByUser(ctx context.Context, userID int64, limit int) ([]Task, error)
 }
@@ -91,6 +92,20 @@ func (s taskService) ListRecentTasks(ctx context.Context, userID int64, limit in
 	tasks, err := s.repo.ListRecentByUser(ctx, userID, limit)
 	if err != nil {
 		return nil, fmt.Errorf("service: list recent tasks: %w", err)
+	}
+	return tasks, nil
+}
+
+func (s taskService) ListFailedTasksForRetry(ctx context.Context, maxRetryCount int, limit int) ([]Task, error) {
+	if s.repo == nil {
+		return nil, errors.New("service: task repository is required")
+	}
+	if maxRetryCount <= 0 {
+		return nil, errors.New("service: max retry count must be greater than zero")
+	}
+	tasks, err := s.repo.ListFailedForRetry(ctx, maxRetryCount, limit)
+	if err != nil {
+		return nil, fmt.Errorf("service: list failed tasks for retry: %w", err)
 	}
 	return tasks, nil
 }

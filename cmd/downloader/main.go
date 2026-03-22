@@ -62,11 +62,13 @@ type queueConsumer interface {
 	Pull(ctx context.Context, batchSize, visibilityTimeoutMs int) ([]queue.ReceivedMessage, error)
 	Ack(ctx context.Context, leaseIDs []string) error
 	Retry(ctx context.Context, leaseIDs []string) error
+	Enqueue(ctx context.Context, message queue.Message) error
 }
 
 type taskService interface {
 	GetTask(ctx context.Context, taskID string) (service.Task, error)
 	UpdateTask(ctx context.Context, taskID string, update service.TaskUpdate) error
+	ListFailedTasksForRetry(ctx context.Context, maxRetryCount int, limit int) ([]service.Task, error)
 }
 
 type queuePullLoop struct {
@@ -97,6 +99,7 @@ func (l queuePullLoop) Run(ctx context.Context, cfg config.Config) error {
 		"workers", cfg.Downloader.Workers,
 		"queue_batch_size", cfg.Cloudflare.QueueBatchSize,
 	)
+	l.requeueFailedTasksOnStartup(ctx)
 
 	for {
 		select {
@@ -119,6 +122,59 @@ func (l queuePullLoop) Run(ctx context.Context, cfg config.Config) error {
 		for _, message := range messages {
 			l.processMessage(ctx, cfg, message)
 		}
+	}
+}
+
+func (l queuePullLoop) requeueFailedTasksOnStartup(ctx context.Context) {
+	const retryScanLimit = 200
+
+	if l.maxAttempts <= 0 {
+		return
+	}
+
+	tasks, err := l.tasks.ListFailedTasksForRetry(ctx, l.maxAttempts, retryScanLimit)
+	if err != nil {
+		l.logger.Error("downloader startup retry scan failed", "error", err)
+		return
+	}
+	if len(tasks) == 0 {
+		return
+	}
+
+	for _, task := range tasks {
+		requeueMessage := queue.Message{
+			TaskID:       task.TaskID,
+			ChatID:       task.ChatID,
+			UserID:       task.UserID,
+			TargetChatID: task.TargetChatID,
+			URL:          task.URL,
+			CreatedAt:    time.Now().UTC(),
+			Idempotency:  task.IdempotencyKey,
+		}
+		if err := l.queue.Enqueue(ctx, requeueMessage); err != nil {
+			l.logger.Error("downloader startup retry enqueue failed",
+				"task_id", task.TaskID,
+				"retry_count", task.RetryCount,
+				"error", err,
+			)
+			continue
+		}
+
+		status := service.StatusRetrying
+		if err := l.tasks.UpdateTask(ctx, task.TaskID, service.TaskUpdate{Status: status}); err != nil {
+			l.logger.Error("downloader startup retry status update failed",
+				"task_id", task.TaskID,
+				"status_to", status,
+				"error", err,
+			)
+			continue
+		}
+
+		l.logger.Info("downloader startup retry enqueued",
+			"task_id", task.TaskID,
+			"retry_count", task.RetryCount,
+			"status_to", status,
+		)
 	}
 }
 
@@ -398,7 +454,10 @@ func classifyTDLError(runCtx context.Context, result dl.RunResult, runErr error)
 		return dl.ErrorClassUnknown
 	}
 
-	if errors.Is(runCtx.Err(), context.DeadlineExceeded) || errors.Is(runCtx.Err(), context.Canceled) {
+	if errors.Is(runCtx.Err(), context.DeadlineExceeded) {
+		return dl.ErrorClassNonRetryable
+	}
+	if errors.Is(runCtx.Err(), context.Canceled) {
 		return dl.ErrorClassRetryable
 	}
 

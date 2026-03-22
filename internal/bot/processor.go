@@ -30,6 +30,10 @@ func (h Handler) HandleUpdate(ctx context.Context, update telegram.Update) (*Upd
 			Text:   outcome.Reply,
 		},
 	}
+	if update.Message.MessageID > 0 {
+		replyToMessageID := update.Message.MessageID
+		result.SendRequest.ReplyToMessageID = &replyToMessageID
+	}
 	if outcome.ReactionEmoji != "" {
 		result.ReactionRequest = &telegram.SetMessageReactionRequest{
 			ChatID:    update.Message.Chat.ID,

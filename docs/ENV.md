@@ -27,7 +27,7 @@ All configuration is read from environment variables.
 - `TDL_LOGIN_REQUIRED`: optional boolean, defaults to `true`
 - `TDL_LOGIN_CHECK_ON_START`: optional boolean, defaults to `true`
 - `DOWNLOADER_WORKERS`: optional worker count, defaults to `2`
-- `TASK_TIMEOUT_MINUTES`: optional per-task timeout, defaults to `60`
+- `TASK_TIMEOUT_MINUTES`: optional per-task timeout, defaults to `180` (3 hours, timeout tasks are marked failed and acked)
 
 ## Storage
 

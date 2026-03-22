@@ -17,7 +17,7 @@ const (
 	defaultTDLBin                   = "tdl"
 	defaultTDLNamespace             = "default"
 	defaultDownloaderWorkers        = 2
-	defaultTaskTimeoutMinutes       = 60
+	defaultTaskTimeoutMinutes       = 180
 	defaultSQLitePath               = "./data/tasks.db"
 	defaultLogLevel                 = "info"
 	defaultEnvironment              = "dev"

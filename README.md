@@ -56,6 +56,7 @@ Make sure `tdl login` has been completed first, then start the downloader:
 
 The downloader performs a session preflight check before it begins consuming the queue.
 The execution model is: `message URL -> queue -> tdl forward`.
+On startup, downloader also re-enqueues historical failed/dead-lettered tasks that are still below the retry cap.
 
 ## Docker build and run
 
@@ -92,6 +93,7 @@ This login state is persisted in Docker volumes (`tgdl-data` and `tgdl-tdl-sessi
 
 - The bot and downloader may run on the same machine or separately.
 - The downloader must not consume tasks until `tdl` session preflight succeeds.
+- Task execution timeout defaults to 3 hours (`TASK_TIMEOUT_MINUTES=180`); timeout tasks are marked failed and removed from queue.
 - SQLite is used as the local task store; keep the database on persistent storage.
 - This phase does not include a web UI, object storage, or worker-based deployment.
 - Bot accepts Telegram message URLs only and creates forward tasks.

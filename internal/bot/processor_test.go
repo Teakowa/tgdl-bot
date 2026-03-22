@@ -13,6 +13,7 @@ func TestHandleUpdateBuildsReply(t *testing.T) {
 	outcome, err := h.HandleUpdate(context.Background(), telegram.Update{
 		UpdateID: 1,
 		Message: &telegram.Message{
+			MessageID: 99,
 			Chat: telegram.Chat{ID: 10},
 			From: &telegram.User{ID: 20},
 			Text: "/help",
@@ -23,6 +24,9 @@ func TestHandleUpdateBuildsReply(t *testing.T) {
 	}
 	if outcome == nil || outcome.SendRequest == nil || outcome.SendRequest.ChatID != 10 || outcome.SendRequest.Text == "" {
 		t.Fatalf("unexpected send request: %+v", outcome)
+	}
+	if outcome.SendRequest.ReplyToMessageID == nil || *outcome.SendRequest.ReplyToMessageID != 99 {
+		t.Fatalf("expected reply_to_message_id=99, got %+v", outcome.SendRequest.ReplyToMessageID)
 	}
 }
 

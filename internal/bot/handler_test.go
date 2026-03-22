@@ -66,6 +66,13 @@ func (f *fakeTaskQuery) ListRecentTasks(context.Context, int64, int) ([]service.
 	return f.tasks, nil
 }
 
+func (f *fakeTaskQuery) ListFailedTasksForRetry(context.Context, int, int) ([]service.Task, error) {
+	if f.err != nil {
+		return nil, f.err
+	}
+	return nil, nil
+}
+
 func (f *fakeTaskQuery) FindByIdempotencyKey(context.Context, string) (service.Task, error) {
 	if f.err != nil {
 		return service.Task{}, f.err

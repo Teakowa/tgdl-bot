@@ -65,3 +65,30 @@ func TestSetMessageReactionReturnsAPIError(t *testing.T) {
 		t.Fatal("expected error")
 	}
 }
+
+func TestSendMessageIncludesReplyToMessageID(t *testing.T) {
+	var captured map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer r.Body.Close()
+		if err := json.NewDecoder(r.Body).Decode(&captured); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"ok":true,"result":{"message_id":1,"chat":{"id":123},"text":"ok"}}`))
+	}))
+	defer server.Close()
+
+	client := NewHTTPClient(server.URL, "token", time.Second)
+	replyTo := int64(42)
+	if _, err := client.SendMessage(context.Background(), SendMessageRequest{
+		ChatID:           123,
+		Text:             "ok",
+		ReplyToMessageID: &replyTo,
+	}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if int(captured["reply_to_message_id"].(float64)) != 42 {
+		t.Fatalf("unexpected reply_to_message_id: %v", captured["reply_to_message_id"])
+	}
+}

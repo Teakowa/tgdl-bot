@@ -9,7 +9,7 @@ Phase 1 forwarding scope only.
 Used by the bot service to:
 
 - receive updates
-- reply to users
+- reply to users (with `reply_to_message_id` to quote the original message)
 - send task completion or failure notifications
 
 ### Cloudflare Queues HTTP API
@@ -67,5 +67,7 @@ Used by the downloader service to perform message forward work.
 - Bot accepts Telegram URLs only.
 - Bot persists a queued forward task before enqueueing to Cloudflare Queue.
 - Downloader performs session preflight before pulling tasks.
+- Downloader startup re-enqueues failed/dead-lettered tasks still below retry cap.
 - Downloader uses `exec.CommandContext` for `tdl`.
 - Downloader captures stdout, stderr, exit code, and timeout behavior.
+- Timeout tasks (default 3 hours) are marked `failed` and acked instead of retried.
