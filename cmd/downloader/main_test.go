@@ -146,10 +146,10 @@ func TestQueuePullLoopProcessMessageSuccessAcks(t *testing.T) {
 	tasks := &fakeTasks{
 		claimed: true,
 		task: service.Task{
-			TaskID:       "t1",
-			URL:          "https://t.me/c/1/2",
-			TargetChatID: 100,
-			Status:       service.StatusQueued,
+			TaskID:     "t1",
+			URL:        "https://t.me/c/1/2",
+			TargetPeer: "100",
+			Status:     service.StatusQueued,
 		},
 	}
 	loop := queuePullLoop{
@@ -188,10 +188,10 @@ func TestQueuePullLoopProcessMessageSuccessPublishesStatusEventPayload(t *testin
 	tasks := &fakeTasks{
 		claimed: true,
 		task: service.Task{
-			TaskID:       "t1",
-			URL:          "https://t.me/c/1/2",
-			TargetChatID: 100,
-			Status:       service.StatusQueued,
+			TaskID:     "t1",
+			URL:        "https://t.me/c/1/2",
+			TargetPeer: "100",
+			Status:     service.StatusQueued,
 		},
 	}
 
@@ -263,10 +263,10 @@ func TestQueuePullLoopStatusPublishFailureDoesNotAffectAck(t *testing.T) {
 	tasks := &fakeTasks{
 		claimed: true,
 		task: service.Task{
-			TaskID:       "t1",
-			URL:          "https://t.me/c/1/2",
-			TargetChatID: 100,
-			Status:       service.StatusQueued,
+			TaskID:     "t1",
+			URL:        "https://t.me/c/1/2",
+			TargetPeer: "100",
+			Status:     service.StatusQueued,
 		},
 	}
 	loop := queuePullLoop{
@@ -295,11 +295,11 @@ func TestQueuePullLoopProcessMessageNonRetryableAcks(t *testing.T) {
 	tasks := &fakeTasks{
 		claimed: true,
 		task: service.Task{
-			TaskID:       "t1",
-			URL:          "https://t.me/c/1/2",
-			TargetChatID: 100,
-			Status:       service.StatusQueued,
-			RetryCount:   0,
+			TaskID:     "t1",
+			URL:        "https://t.me/c/1/2",
+			TargetPeer: "100",
+			Status:     service.StatusQueued,
+			RetryCount: 0,
 		},
 	}
 	loop := queuePullLoop{
@@ -336,11 +336,11 @@ func TestQueuePullLoopProcessMessageRetryableNetworkErrorRetries(t *testing.T) {
 	tasks := &fakeTasks{
 		claimed: true,
 		task: service.Task{
-			TaskID:       "t1",
-			URL:          "https://t.me/c/1/2",
-			TargetChatID: 100,
-			Status:       service.StatusQueued,
-			RetryCount:   0,
+			TaskID:     "t1",
+			URL:        "https://t.me/c/1/2",
+			TargetPeer: "100",
+			Status:     service.StatusQueued,
+			RetryCount: 0,
 		},
 	}
 	loop := queuePullLoop{
@@ -381,11 +381,11 @@ func TestQueuePullLoopProcessMessageRetryableExhaustedDeadLettered(t *testing.T)
 	tasks := &fakeTasks{
 		claimed: true,
 		task: service.Task{
-			TaskID:       "t1",
-			URL:          "https://t.me/c/1/2",
-			TargetChatID: 100,
-			Status:       service.StatusRetrying,
-			RetryCount:   2,
+			TaskID:     "t1",
+			URL:        "https://t.me/c/1/2",
+			TargetPeer: "100",
+			Status:     service.StatusRetrying,
+			RetryCount: 2,
 		},
 	}
 	loop := queuePullLoop{
@@ -469,7 +469,7 @@ func TestQueuePullLoopRunRequeuesFailedTasksOnStartup(t *testing.T) {
 				TaskID:         "retry-task",
 				ChatID:         1,
 				UserID:         2,
-				TargetChatID:   3,
+				TargetPeer:     "channel_name",
 				URL:            "https://t.me/c/1/2",
 				IdempotencyKey: "idem-1",
 				RetryCount:     1,
@@ -512,10 +512,10 @@ func TestQueuePullLoopEmitsLifecycleLogs(t *testing.T) {
 	tasks := &fakeTasks{
 		claimed: true,
 		task: service.Task{
-			TaskID:       "t-log",
-			URL:          "https://t.me/c/1/2",
-			TargetChatID: 100,
-			Status:       service.StatusQueued,
+			TaskID:     "t-log",
+			URL:        "https://t.me/c/1/2",
+			TargetPeer: "100",
+			Status:     service.StatusQueued,
 		},
 	}
 	capture := newLogCapture()
@@ -553,10 +553,10 @@ func TestQueuePullLoopEmitsTDLStreamLogs(t *testing.T) {
 	tasks := &fakeTasks{
 		claimed: true,
 		task: service.Task{
-			TaskID:       "t-stream",
-			URL:          "https://t.me/c/1/2",
-			TargetChatID: 100,
-			Status:       service.StatusQueued,
+			TaskID:     "t-stream",
+			URL:        "https://t.me/c/1/2",
+			TargetPeer: "100",
+			Status:     service.StatusQueued,
 		},
 	}
 	capture := newLogCapture()

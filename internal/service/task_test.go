@@ -7,12 +7,25 @@ import (
 )
 
 func TestNewIdempotencyKey(t *testing.T) {
-	got := NewIdempotencyKey(123, "https://t.me/c/999/42")
-	sum := sha256.Sum256([]byte("123|https://t.me/c/999/42"))
+	got := NewIdempotencyKey(123, "https://t.me/c/999/42", "channel_name", true)
+	sum := sha256.Sum256([]byte("123|https://t.me/c/999/42|channel_name|drop-caption"))
 	want := hex.EncodeToString(sum[:])
 
 	if got != want {
 		t.Fatalf("idempotency key mismatch: got %q want %q", got, want)
+	}
+}
+
+func TestNewIdempotencyKeyVariesByTargetAndCaptionMode(t *testing.T) {
+	a := NewIdempotencyKey(123, "https://t.me/c/999/42", "channel_a", false)
+	b := NewIdempotencyKey(123, "https://t.me/c/999/42", "channel_b", false)
+	c := NewIdempotencyKey(123, "https://t.me/c/999/42", "channel_a", true)
+
+	if a == b {
+		t.Fatal("expected different target peers to produce different keys")
+	}
+	if a == c {
+		t.Fatal("expected different caption modes to produce different keys")
 	}
 }
 

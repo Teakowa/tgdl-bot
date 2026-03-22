@@ -8,10 +8,10 @@ import (
 
 func TestBuildForwardArgs(t *testing.T) {
 	got, err := buildForwardArgs(DownloadRequest{
-		URL:          "https://t.me/c/123/456",
-		TargetChatID: 999001,
-		Namespace:    "default",
-		Storage:      "/tmp/tdl-storage",
+		URL:        "https://t.me/c/123/456",
+		TargetPeer: "999001",
+		Namespace:  "default",
+		Storage:    "/tmp/tdl-storage",
 	})
 	if err != nil {
 		t.Fatalf("buildForwardArgs returned error: %v", err)
@@ -21,6 +21,7 @@ func TestBuildForwardArgs(t *testing.T) {
 		"forward",
 		"--from", "https://t.me/c/123/456",
 		"--to", "999001",
+		"--mode", "direct",
 		"--reconnect-timeout", "10m",
 		"--ns", "default",
 		"--storage", "/tmp/tdl-storage",
@@ -36,7 +37,7 @@ func TestBuildForwardArgs(t *testing.T) {
 	}
 }
 
-func TestBuildForwardArgsOmitsTargetChatIDWhenUnset(t *testing.T) {
+func TestBuildForwardArgsOmitsTargetPeerWhenUnset(t *testing.T) {
 	got, err := buildForwardArgs(DownloadRequest{
 		URL: "https://t.me/c/123/456",
 	})
@@ -47,6 +48,7 @@ func TestBuildForwardArgsOmitsTargetChatIDWhenUnset(t *testing.T) {
 	want := []string{
 		"forward",
 		"--from", "https://t.me/c/123/456",
+		"--mode", "direct",
 		"--reconnect-timeout", "10m",
 	}
 
@@ -60,10 +62,10 @@ func TestBuildForwardArgsOmitsTargetChatIDWhenUnset(t *testing.T) {
 	}
 }
 
-func TestBuildForwardArgsKeepsNegativeTargetChatID(t *testing.T) {
+func TestBuildForwardArgsKeepsNegativeTargetPeer(t *testing.T) {
 	got, err := buildForwardArgs(DownloadRequest{
-		URL:          "https://t.me/c/123/456",
-		TargetChatID: -1001234567890,
+		URL:        "https://t.me/c/123/456",
+		TargetPeer: "-1001234567890",
 	})
 	if err != nil {
 		t.Fatalf("buildForwardArgs returned error: %v", err)
@@ -78,6 +80,34 @@ func TestBuildForwardArgsKeepsNegativeTargetChatID(t *testing.T) {
 	}
 	if !hasTo {
 		t.Fatalf("expected --to with negative chat id, got=%v", got)
+	}
+}
+
+func TestBuildForwardArgsDropCaptionUsesCloneAndEdit(t *testing.T) {
+	got, err := buildForwardArgs(DownloadRequest{
+		URL:         "https://t.me/c/123/456",
+		TargetPeer:  "channel_name",
+		DropCaption: true,
+	})
+	if err != nil {
+		t.Fatalf("buildForwardArgs returned error: %v", err)
+	}
+
+	want := []string{
+		"forward",
+		"--from", "https://t.me/c/123/456",
+		"--to", "channel_name",
+		"--mode", "clone",
+		"--edit", `""`,
+		"--reconnect-timeout", "10m",
+	}
+	if len(got) != len(want) {
+		t.Fatalf("arg length mismatch: got %d want %d\n got=%v\nwant=%v", len(got), len(want), got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("arg %d mismatch: got %q want %q\n got=%v\nwant=%v", i, got[i], want[i], got, want)
+		}
 	}
 }
 

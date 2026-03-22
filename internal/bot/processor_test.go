@@ -66,8 +66,9 @@ func TestHandleUpdateCarriesTaskBindingMetadata(t *testing.T) {
 			TaskID:         req.TaskID,
 			ChatID:         req.ChatID,
 			UserID:         req.UserID,
-			TargetChatID:   req.TargetChatID,
+			TargetPeer:     req.TargetPeer,
 			URL:            req.URL,
+			DropCaption:    req.DropCaption,
 			IdempotencyKey: req.IdempotencyKey,
 			Status:         service.StatusQueued,
 		}, nil

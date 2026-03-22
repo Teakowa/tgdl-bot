@@ -18,16 +18,17 @@ type Consumer interface {
 }
 
 type Message struct {
-	TaskID       string    `json:"task_id"`
-	ChatID       int64     `json:"chat_id"`
-	UserID       int64     `json:"user_id"`
-	TargetChatID int64     `json:"target_chat_id,omitempty"`
-	URL          string    `json:"url"`
-	CreatedAt    time.Time `json:"created_at"`
-	Idempotency  string    `json:"idempotency_key,omitempty"`
-	Status       string    `json:"status,omitempty"`
-	UpdatedAt    time.Time `json:"updated_at,omitempty"`
-	RetryCount   int       `json:"retry_count,omitempty"`
+	TaskID      string    `json:"task_id"`
+	ChatID      int64     `json:"chat_id"`
+	UserID      int64     `json:"user_id"`
+	TargetPeer  string    `json:"target_peer,omitempty"`
+	URL         string    `json:"url"`
+	DropCaption bool      `json:"drop_caption,omitempty"`
+	CreatedAt   time.Time `json:"created_at"`
+	Idempotency string    `json:"idempotency_key,omitempty"`
+	Status      string    `json:"status,omitempty"`
+	UpdatedAt   time.Time `json:"updated_at,omitempty"`
+	RetryCount  int       `json:"retry_count,omitempty"`
 }
 
 type ReceivedMessage struct {

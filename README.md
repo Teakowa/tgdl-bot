@@ -55,6 +55,27 @@ Important Telegram constraint: as long as an outgoing webhook exists, `getUpdate
 To keep polling safe, bot startup always calls `deleteWebhook` with `drop_pending_updates=false`.
 If Telegram returns polling conflict (`error_code=409`), bot auto-recovers by deleting webhook and retrying polling.
 
+Supported bot inputs:
+
+- plain Telegram message URL
+- `/forward <source_url> <target> [--drop-caption]`
+- `/status <task_id>`
+- `/last`
+- `/queue`
+- `/delete [task_id] [-f|--force]`
+- `/retry <task_id>`
+
+`/forward` target formats:
+
+- `@username`
+- `username`
+- `https://t.me/<name>`
+- `https://telegram.me/<name>`
+- numeric chat ID such as `-1001234567890`
+
+Private invite links such as `https://t.me/+...` are not supported.
+By default `/forward` preserves the original caption/text. Add `--drop-caption` to send the cloned message without the original caption.
+
 ### 3. Run the downloader
 
 Make sure `tdl login` has been completed first, then start the downloader:
@@ -138,5 +159,5 @@ Container image publication remains tag-driven: when the release workflow create
 - Only one active downloader replica may use the same `TDL_NAMESPACE`/storage. Horizontal scale requires separate `tdl` sessions/storage plus explicit sharding, which is out of scope here.
 - Task execution timeout defaults to 3 hours (`TASK_TIMEOUT_MINUTES=180`); timeout tasks are marked failed and removed from queue.
 - This system does not include a web UI, object storage, or worker-based deployment.
-- Bot accepts Telegram message URLs only and creates forward tasks.
+- Bot accepts Telegram message URLs directly and also supports `/forward <source_url> <target> [--drop-caption]`.
 - In webhook mode, route HTTPS traffic to bot listen address (`TELEGRAM_WEBHOOK_LISTEN_ADDR`, default `:8080`) and configure `TELEGRAM_WEBHOOK_SECRET`.

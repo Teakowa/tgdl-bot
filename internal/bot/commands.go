@@ -13,12 +13,16 @@ const (
 	CommandQueue   Command = "/queue"
 	CommandDelete  Command = "/delete"
 	CommandRetry   Command = "/retry"
+	CommandForward Command = "/forward"
 )
 
 type ParsedCommand struct {
-	Name   Command
-	TaskID string
-	Force  bool
+	Name        Command
+	TaskID      string
+	Force       bool
+	SourceURL   string
+	TargetPeer  string
+	DropCaption bool
 }
 
 func ParseCommand(text string) ParsedCommand {
@@ -57,6 +61,8 @@ func ParseCommand(text string) ParsedCommand {
 			out.TaskID = fields[1]
 		}
 		return out
+	case string(CommandForward):
+		return parseForwardCommand(fields[1:])
 	default:
 		return ParsedCommand{Name: CommandUnknown}
 	}
@@ -76,4 +82,24 @@ func parseDeleteArgs(args []string) (string, bool) {
 		}
 	}
 	return taskID, force
+}
+
+func parseForwardCommand(args []string) ParsedCommand {
+	out := ParsedCommand{Name: CommandForward}
+	positional := make([]string, 0, len(args))
+	for _, arg := range args {
+		switch arg {
+		case "--drop-caption":
+			out.DropCaption = true
+		default:
+			positional = append(positional, arg)
+		}
+	}
+	if len(positional) > 0 {
+		out.SourceURL = positional[0]
+	}
+	if len(positional) > 1 {
+		out.TargetPeer = positional[1]
+	}
+	return out
 }

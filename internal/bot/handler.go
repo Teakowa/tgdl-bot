@@ -34,6 +34,7 @@ func BuildCommandReply(cmd ParsedCommand) string {
 			"支持命令:",
 			"/start",
 			"/help",
+			"/forward <source_url> <target> [--drop-caption]",
 			"/status <task_id>",
 			"/last",
 			"/queue",
@@ -47,6 +48,8 @@ func BuildCommandReply(cmd ParsedCommand) string {
 		return fmt.Sprintf("任务状态查询已接收: %s", cmd.TaskID)
 	case CommandLast:
 		return "最近任务查询已接收（最多10条）。"
+	case CommandForward:
+		return "用法: /forward <source_url> <target> [--drop-caption]"
 	case CommandQueue:
 		return "活跃任务查询已接收（running/queued/retrying）。"
 	case CommandDelete:
@@ -95,6 +98,19 @@ func (h Handler) HandleTextWithOutcome(ctx context.Context, userID, chatID int64
 	switch cmd.Name {
 	case CommandStart, CommandHelp:
 		return HandleTextOutcome{Reply: BuildCommandReply(cmd)}, nil
+	case CommandForward:
+		if cmd.SourceURL == "" || cmd.TargetPeer == "" {
+			return HandleTextOutcome{Reply: BuildCommandReply(cmd)}, nil
+		}
+		url, ok := ExtractTaskURL(cmd.SourceURL)
+		if !ok || strings.TrimSpace(url) != strings.TrimSpace(cmd.SourceURL) {
+			return HandleTextOutcome{Reply: "源链接必须是受支持的 Telegram 消息链接。"}, nil
+		}
+		targetPeer, ok := NormalizeTargetPeer(cmd.TargetPeer)
+		if !ok {
+			return HandleTextOutcome{Reply: "目标必须是公开群组/频道用户名链接、@username 或数字 chat_id。私有邀请链接暂不支持。"}, nil
+		}
+		return h.createTaskFromRequest(ctx, userID, chatID, url, targetPeer, cmd.DropCaption)
 	case CommandStatus:
 		if cmd.TaskID == "" {
 			return HandleTextOutcome{Reply: BuildCommandReply(cmd)}, nil
@@ -158,7 +174,7 @@ func (h Handler) HandleTextWithOutcome(ctx context.Context, userID, chatID int64
 		if !ok {
 			return HandleTextOutcome{}, nil
 		}
-		return h.createTaskFromURL(ctx, userID, chatID, url)
+		return h.createTaskFromRequest(ctx, userID, chatID, url, "", false)
 	}
 }
 
@@ -219,17 +235,19 @@ func (h Handler) HandleCallback(ctx context.Context, userID int64, callbackID, d
 	}
 }
 
-func (h Handler) createTaskFromURL(ctx context.Context, userID, chatID int64, url string) (HandleTextOutcome, error) {
+func (h Handler) createTaskFromRequest(ctx context.Context, userID, chatID int64, url, targetPeer string, dropCaption bool) (HandleTextOutcome, error) {
 	if h.Tasks == nil || h.Queue == nil {
 		return HandleTextOutcome{Reply: "任务创建暂未启用。"}, nil
 	}
 
 	newTaskIDValue := newTaskID()
-	idempotencyKey := service.NewIdempotencyKey(userID, url)
+	idempotencyKey := service.NewIdempotencyKey(userID, url, targetPeer, dropCaption)
 	h.logInfo("bot task request parsed",
 		"chat_id", chatID,
 		"user_id", userID,
 		"url", redactURL(url),
+		"target_peer", targetPeer,
+		"drop_caption", dropCaption,
 		"idempotency_key_prefix", idempotencyKeyPrefix(idempotencyKey),
 	)
 
@@ -237,7 +255,9 @@ func (h Handler) createTaskFromURL(ctx context.Context, userID, chatID int64, ur
 		TaskID:         newTaskIDValue,
 		ChatID:         chatID,
 		UserID:         userID,
+		TargetPeer:     targetPeer,
 		URL:            url,
+		DropCaption:    dropCaption,
 		IdempotencyKey: idempotencyKey,
 	}
 	task, err := h.Tasks.CreateQueuedTask(ctx, req)
@@ -246,6 +266,7 @@ func (h Handler) createTaskFromURL(ctx context.Context, userID, chatID int64, ur
 			"chat_id", chatID,
 			"user_id", userID,
 			"url", redactURL(url),
+			"target_peer", targetPeer,
 			"error", err,
 		)
 		return HandleTextOutcome{Reply: "任务创建失败，请稍后重试。"}, nil
@@ -367,8 +388,9 @@ func (h Handler) retryTaskByTaskID(ctx context.Context, userID int64, taskID str
 		TaskID:         newTaskID(),
 		ChatID:         task.ChatID,
 		UserID:         task.UserID,
-		TargetChatID:   task.TargetChatID,
 		URL:            task.URL,
+		TargetPeer:     task.TargetPeer,
+		DropCaption:    task.DropCaption,
 		IdempotencyKey: task.IdempotencyKey,
 	}
 	return h.rebuildTaskFromRequest(ctx, req, task)
@@ -435,13 +457,14 @@ func (h Handler) BindTaskMessageRefs(ctx context.Context, taskID string, sourceM
 
 func (h Handler) enqueueTask(ctx context.Context, task service.Task) error {
 	if err := h.Queue.Enqueue(ctx, queue.Message{
-		TaskID:       task.TaskID,
-		ChatID:       task.ChatID,
-		UserID:       task.UserID,
-		TargetChatID: task.TargetChatID,
-		URL:          task.URL,
-		CreatedAt:    task.CreatedAt,
-		Idempotency:  task.IdempotencyKey,
+		TaskID:      task.TaskID,
+		ChatID:      task.ChatID,
+		UserID:      task.UserID,
+		TargetPeer:  task.TargetPeer,
+		URL:         task.URL,
+		DropCaption: task.DropCaption,
+		CreatedAt:   task.CreatedAt,
+		Idempotency: task.IdempotencyKey,
 	}); err != nil {
 		h.logError("bot queue enqueue failed",
 			"task_id", task.TaskID,

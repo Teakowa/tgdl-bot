@@ -36,8 +36,9 @@ func TestD1TaskRepositoryClaimForExecutionSuccess(t *testing.T) {
 						"task_id":"t1",
 						"chat_id":1,
 						"user_id":2,
-						"target_chat_id":0,
+						"target_peer":"",
 						"url":"https://t.me/c/1/2",
+						"drop_caption":0,
 						"status":"running",
 						"idempotency_key":"idem",
 						"retry_count":0,
@@ -123,8 +124,9 @@ func TestD1TaskRepositoryCreateUsesInsertSQL(t *testing.T) {
 		TaskID:         "t1",
 		ChatID:         1,
 		UserID:         2,
-		TargetChatID:   0,
+		TargetPeer:     "channel_name",
 		URL:            "https://t.me/c/1/2",
+		DropCaption:    true,
 		Status:         service.StatusQueued,
 		IdempotencyKey: "idem",
 		CreatedAt:      time.Now().UTC(),
@@ -158,8 +160,9 @@ func TestD1TaskRepositoryListActiveByUserUsesStatusPriorityOrder(t *testing.T) {
 					"task_id":"t1",
 					"chat_id":1,
 					"user_id":2,
-					"target_chat_id":0,
+					"target_peer":"",
 					"url":"https://t.me/c/1/2",
+					"drop_caption":0,
 					"status":"running",
 					"idempotency_key":"idem",
 					"retry_count":0,
@@ -277,5 +280,39 @@ func TestD1TaskRepositoryDeleteNonRunningByUserTaskIDUsesNonRunningStatusFilter(
 	}
 	if !strings.Contains(sqlValue, "status <>") {
 		t.Fatalf("expected non-running status filter in sql, got: %s", sqlValue)
+	}
+}
+
+func TestTaskFromResultRowReadsTargetPeerAndDropCaption(t *testing.T) {
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	task, err := taskFromResultRow(map[string]any{
+		"task_id":           "t1",
+		"chat_id":           int64(1),
+		"user_id":           int64(2),
+		"target_peer":       "channel_name",
+		"url":               "https://t.me/c/1/2",
+		"drop_caption":      int64(1),
+		"status":            "queued",
+		"idempotency_key":   "idem",
+		"retry_count":       int64(0),
+		"source_message_id": nil,
+		"status_message_id": nil,
+		"lease_id":          nil,
+		"output_summary":    nil,
+		"error_message":     nil,
+		"exit_code":         nil,
+		"created_at":        now,
+		"updated_at":        now,
+		"started_at":        nil,
+		"finished_at":       nil,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if task.TargetPeer != "channel_name" {
+		t.Fatalf("expected target peer, got %+v", task)
+	}
+	if !task.DropCaption {
+		t.Fatalf("expected drop caption true, got %+v", task)
 	}
 }

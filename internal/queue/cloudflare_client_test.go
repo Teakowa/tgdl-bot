@@ -30,12 +30,12 @@ func TestEnqueueBatchUsesBodyWrapper(t *testing.T) {
 
 	err := client.EnqueueBatch(context.Background(), []Message{
 		{
-			TaskID:       "t1",
-			ChatID:       1,
-			UserID:       2,
-			TargetChatID: 3,
-			URL:          "https://t.me/c/1/2",
-			CreatedAt:    time.Now().UTC(),
+			TaskID:     "t1",
+			ChatID:     1,
+			UserID:     2,
+			TargetPeer: "channel_name",
+			URL:        "https://t.me/c/1/2",
+			CreatedAt:  time.Now().UTC(),
 		},
 	})
 	if err != nil {
@@ -76,12 +76,12 @@ func TestEnqueueUsesSingleBodyPayload(t *testing.T) {
 	client.baseURL = server.URL
 
 	err := client.Enqueue(context.Background(), Message{
-		TaskID:       "t1",
-		ChatID:       1,
-		UserID:       2,
-		TargetChatID: 3,
-		URL:          "https://t.me/c/1/2",
-		CreatedAt:    time.Now().UTC(),
+		TaskID:     "t1",
+		ChatID:     1,
+		UserID:     2,
+		TargetPeer: "channel_name",
+		URL:        "https://t.me/c/1/2",
+		CreatedAt:  time.Now().UTC(),
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -95,7 +95,7 @@ func TestEnqueueUsesSingleBodyPayload(t *testing.T) {
 	}
 }
 
-func TestEnqueueOmitsTargetChatIDWhenUnset(t *testing.T) {
+func TestEnqueueOmitsTargetPeerWhenUnset(t *testing.T) {
 	var captured map[string]any
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		defer r.Body.Close()
@@ -125,8 +125,8 @@ func TestEnqueueOmitsTargetChatIDWhenUnset(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected body payload, got: %#v", captured["body"])
 	}
-	if _, exists := body["target_chat_id"]; exists {
-		t.Fatalf("expected target_chat_id to be omitted when unset, got: %#v", body)
+	if _, exists := body["target_peer"]; exists {
+		t.Fatalf("expected target_peer to be omitted when unset, got: %#v", body)
 	}
 }
 
@@ -140,8 +140,8 @@ func TestPullSkipsInvalidBodiesAndParsesJSONStringBody(t *testing.T) {
 			"result": {
 				"messages": [
 					{"lease_id":"l1","body":"not-json-object"},
-					{"lease_id":"l2","body":"{\"task_id\":\"t2\",\"chat_id\":1,\"user_id\":2,\"target_chat_id\":3,\"url\":\"https://t.me/c/1/2\",\"created_at\":\"2026-03-21T18:00:00Z\"}"},
-					{"lease_id":"l3","body":"eyJ0YXNrX2lkIjoidDMiLCJjaGF0X2lkIjoxLCJ1c2VyX2lkIjoyLCJ0YXJnZXRfY2hhdF9pZCI6MywidXJsIjoiaHR0cHM6Ly90Lm1lL2MvMS8zIiwiY3JlYXRlZF9hdCI6IjIwMjYtMDMtMjFUMTg6MDA6MDBaIn0="}
+					{"lease_id":"l2","body":"{\"task_id\":\"t2\",\"chat_id\":1,\"user_id\":2,\"target_peer\":\"channel_name\",\"url\":\"https://t.me/c/1/2\",\"created_at\":\"2026-03-21T18:00:00Z\"}"},
+					{"lease_id":"l3","body":"eyJ0YXNrX2lkIjoidDMiLCJjaGF0X2lkIjoxLCJ1c2VyX2lkIjoyLCJ0YXJnZXRfcGVlciI6ImNoYW5uZWxfbmFtZSIsInVybCI6Imh0dHBzOi8vdC5tZS9jLzEvMyIsImNyZWF0ZWRfYXQiOiIyMDI2LTAzLTIxVDE4OjAwOjAwWiJ9"}
 				]
 			}
 		}`))
@@ -170,7 +170,7 @@ func TestPullSkipsInvalidBodiesAndParsesJSONStringBody(t *testing.T) {
 }
 
 func TestDecodeMessageBodyParsesBase64JSON(t *testing.T) {
-	rawJSON := `{"task_id":"t4","chat_id":1,"user_id":2,"target_chat_id":3,"url":"https://t.me/c/1/4","created_at":"2026-03-21T18:00:00Z"}`
+	rawJSON := `{"task_id":"t4","chat_id":1,"user_id":2,"target_peer":"channel_name","url":"https://t.me/c/1/4","created_at":"2026-03-21T18:00:00Z"}`
 	encoded := base64.StdEncoding.EncodeToString([]byte(rawJSON))
 	input, _ := json.Marshal(encoded)
 

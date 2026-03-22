@@ -142,7 +142,7 @@ func TestCreateQueuedTaskReturnsExistingByIdempotency(t *testing.T) {
 		TaskID:         "new",
 		ChatID:         1,
 		UserID:         1,
-		TargetChatID:   1,
+		TargetPeer:     "target-a",
 		URL:            "https://t.me/c/1/2",
 		IdempotencyKey: "k",
 	})
@@ -154,7 +154,7 @@ func TestCreateQueuedTaskReturnsExistingByIdempotency(t *testing.T) {
 	}
 }
 
-func TestCreateQueuedTaskAllowsMissingTargetChatID(t *testing.T) {
+func TestCreateQueuedTaskAllowsMissingTargetPeer(t *testing.T) {
 	svc := NewTaskService(&fakeRepo{})
 
 	task, err := svc.CreateQueuedTask(context.Background(), CreateQueuedTaskRequest{
@@ -167,8 +167,28 @@ func TestCreateQueuedTaskAllowsMissingTargetChatID(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if task.TargetChatID != 0 {
-		t.Fatalf("expected target chat id to remain unset, got %d", task.TargetChatID)
+	if task.TargetPeer != "" {
+		t.Fatalf("expected target peer to remain unset, got %q", task.TargetPeer)
+	}
+}
+
+func TestCreateQueuedTaskPersistsDropCaption(t *testing.T) {
+	svc := NewTaskService(&fakeRepo{})
+
+	task, err := svc.CreateQueuedTask(context.Background(), CreateQueuedTaskRequest{
+		TaskID:         "new",
+		ChatID:         1,
+		UserID:         1,
+		TargetPeer:     "channel_name",
+		URL:            "https://t.me/c/1/2",
+		DropCaption:    true,
+		IdempotencyKey: "k-drop",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !task.DropCaption {
+		t.Fatal("expected drop_caption to be persisted")
 	}
 }
 
@@ -195,7 +215,7 @@ func TestCreateQueuedTaskPropagatesRepositoryError(t *testing.T) {
 		TaskID:         "new",
 		ChatID:         1,
 		UserID:         1,
-		TargetChatID:   1,
+		TargetPeer:     "target-a",
 		URL:            "https://t.me/c/1/2",
 		IdempotencyKey: "k",
 	})

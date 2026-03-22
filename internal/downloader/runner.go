@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os/exec"
 	"regexp"
+	"strings"
 	"time"
 )
 
@@ -20,11 +21,12 @@ const (
 )
 
 type DownloadRequest struct {
-	URL          string
-	TargetChatID int64
-	Binary       string
-	Namespace    string
-	Storage      string
+	URL         string
+	TargetPeer  string
+	DropCaption bool
+	Binary      string
+	Namespace   string
+	Storage     string
 }
 
 type RunResult struct {
@@ -113,8 +115,13 @@ func buildForwardArgs(req DownloadRequest) ([]string, error) {
 		"forward",
 		"--from", req.URL,
 	}
-	if req.TargetChatID != 0 {
-		args = append(args, "--to", fmt.Sprintf("%d", req.TargetChatID))
+	if strings.TrimSpace(req.TargetPeer) != "" {
+		args = append(args, "--to", strings.TrimSpace(req.TargetPeer))
+	}
+	if req.DropCaption {
+		args = append(args, "--mode", "clone", "--edit", `""`)
+	} else {
+		args = append(args, "--mode", "direct")
 	}
 	args = append(args, "--reconnect-timeout", defaultReconnectTimeout)
 

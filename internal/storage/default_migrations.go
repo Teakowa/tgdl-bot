@@ -8,7 +8,9 @@ func DefaultMigrations() []Migration {
   chat_id INTEGER NOT NULL,
   user_id INTEGER NOT NULL,
   target_chat_id INTEGER NOT NULL,
+  target_peer TEXT NOT NULL DEFAULT '',
   url TEXT NOT NULL,
+  drop_caption INTEGER NOT NULL DEFAULT 0,
   status TEXT NOT NULL,
   idempotency_key TEXT NOT NULL,
   retry_count INTEGER NOT NULL DEFAULT 0,
@@ -32,5 +34,12 @@ CREATE INDEX IF NOT EXISTS idx_tasks_idempotency_key
 
 CREATE INDEX IF NOT EXISTS idx_tasks_status
   ON tasks(status);`,
+	}, {
+		Name: "002_target_peer.sql",
+		SQL: `ALTER TABLE tasks ADD COLUMN IF NOT EXISTS target_peer TEXT NOT NULL DEFAULT '';
+ALTER TABLE tasks ADD COLUMN IF NOT EXISTS drop_caption INTEGER NOT NULL DEFAULT 0;
+UPDATE tasks
+SET target_peer = ''
+WHERE target_peer IS NULL;`,
 	}}
 }

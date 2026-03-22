@@ -42,8 +42,9 @@ type Task struct {
 	TaskID          string     `json:"task_id"`
 	ChatID          int64      `json:"chat_id"`
 	UserID          int64      `json:"user_id"`
-	TargetChatID    int64      `json:"target_chat_id,omitempty"`
+	TargetPeer      string     `json:"target_peer,omitempty"`
 	URL             string     `json:"url"`
+	DropCaption     bool       `json:"drop_caption,omitempty"`
 	Status          Status     `json:"status"`
 	CreatedAt       time.Time  `json:"created_at"`
 	UpdatedAt       time.Time  `json:"updated_at"`
@@ -63,8 +64,9 @@ type CreateQueuedTaskRequest struct {
 	TaskID         string
 	ChatID         int64
 	UserID         int64
-	TargetChatID   int64
+	TargetPeer     string
 	URL            string
+	DropCaption    bool
 	IdempotencyKey string
 }
 
@@ -101,7 +103,16 @@ type TaskService interface {
 	UpdateTask(ctx context.Context, taskID string, update TaskUpdate) error
 }
 
-func NewIdempotencyKey(userID int64, normalizedURL string) string {
-	sum := sha256.Sum256([]byte(fmt.Sprintf("%d|%s", userID, strings.TrimSpace(normalizedURL))))
+func NewIdempotencyKey(userID int64, normalizedURL, normalizedTargetPeer string, dropCaption bool) string {
+	mode := "keep-caption"
+	if dropCaption {
+		mode = "drop-caption"
+	}
+	sum := sha256.Sum256([]byte(fmt.Sprintf("%d|%s|%s|%s",
+		userID,
+		strings.TrimSpace(normalizedURL),
+		strings.TrimSpace(normalizedTargetPeer),
+		mode,
+	)))
 	return hex.EncodeToString(sum[:])
 }

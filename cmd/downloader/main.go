@@ -149,13 +149,14 @@ func (l queuePullLoop) requeueFailedTasksOnStartup(ctx context.Context) {
 
 	for _, task := range tasks {
 		requeueMessage := queue.Message{
-			TaskID:       task.TaskID,
-			ChatID:       task.ChatID,
-			UserID:       task.UserID,
-			TargetChatID: task.TargetChatID,
-			URL:          task.URL,
-			CreatedAt:    time.Now().UTC(),
-			Idempotency:  task.IdempotencyKey,
+			TaskID:      task.TaskID,
+			ChatID:      task.ChatID,
+			UserID:      task.UserID,
+			TargetPeer:  task.TargetPeer,
+			URL:         task.URL,
+			DropCaption: task.DropCaption,
+			CreatedAt:   time.Now().UTC(),
+			Idempotency: task.IdempotencyKey,
 		}
 		if err := l.queue.Enqueue(ctx, requeueMessage); err != nil {
 			l.logger.Error("downloader startup retry enqueue failed",
@@ -421,11 +422,12 @@ func (l queuePullLoop) executeTask(ctx context.Context, cfg config.Config, task 
 	defer cancel()
 
 	cmd, err := l.runner.BuildCommand(runCtx, dl.DownloadRequest{
-		URL:          task.URL,
-		TargetChatID: task.TargetChatID,
-		Binary:       cfg.Downloader.Bin,
-		Namespace:    cfg.Downloader.Namespace,
-		Storage:      cfg.Downloader.Storage,
+		URL:         task.URL,
+		TargetPeer:  task.TargetPeer,
+		DropCaption: task.DropCaption,
+		Binary:      cfg.Downloader.Bin,
+		Namespace:   cfg.Downloader.Namespace,
+		Storage:     cfg.Downloader.Storage,
 	})
 	if err != nil {
 		return dl.RunResult{}, dl.ErrorClassNonRetryable, errors.Join(dl.ErrNonRetryable, err)

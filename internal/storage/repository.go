@@ -41,15 +41,17 @@ func (r *D1TaskRepository) Create(ctx context.Context, task service.Task) error 
 
 	_, err := r.Client.Query(ctx, `
 		INSERT INTO tasks (
-			task_id, chat_id, user_id, target_chat_id, url, status, idempotency_key,
+			task_id, chat_id, user_id, target_chat_id, target_peer, url, drop_caption, status, idempotency_key,
 			retry_count, source_message_id, status_message_id, lease_id, output_summary, error_message, exit_code,
 			created_at, updated_at, started_at, finished_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		task.TaskID,
 		task.ChatID,
 		task.UserID,
-		task.TargetChatID,
+		0,
+		task.TargetPeer,
 		task.URL,
+		boolToInt(task.DropCaption),
 		string(task.Status),
 		task.IdempotencyKey,
 		task.RetryCount,
@@ -108,7 +110,7 @@ func (r *D1TaskRepository) FindByID(ctx context.Context, taskID string) (service
 	}
 
 	result, err := r.Client.Query(ctx, `
-		SELECT task_id, chat_id, user_id, target_chat_id, url, status, idempotency_key,
+		SELECT task_id, chat_id, user_id, target_peer, url, drop_caption, status, idempotency_key,
 		       retry_count, source_message_id, status_message_id, lease_id, output_summary, error_message, exit_code,
 		       created_at, updated_at, started_at, finished_at
 		FROM tasks
@@ -134,7 +136,7 @@ func (r *D1TaskRepository) FindByIdempotencyKey(ctx context.Context, idempotency
 	}
 
 	result, err := r.Client.Query(ctx, `
-		SELECT task_id, chat_id, user_id, target_chat_id, url, status, idempotency_key,
+		SELECT task_id, chat_id, user_id, target_peer, url, drop_caption, status, idempotency_key,
 		       retry_count, source_message_id, status_message_id, lease_id, output_summary, error_message, exit_code,
 		       created_at, updated_at, started_at, finished_at
 		FROM tasks
@@ -164,7 +166,7 @@ func (r *D1TaskRepository) ListActiveByUser(ctx context.Context, userID int64, l
 	}
 
 	result, err := r.Client.Query(ctx, `
-		SELECT task_id, chat_id, user_id, target_chat_id, url, status, idempotency_key,
+		SELECT task_id, chat_id, user_id, target_peer, url, drop_caption, status, idempotency_key,
 		       retry_count, source_message_id, status_message_id, lease_id, output_summary, error_message, exit_code,
 		       created_at, updated_at, started_at, finished_at
 		FROM tasks
@@ -215,7 +217,7 @@ func (r *D1TaskRepository) ListFailedForRetry(ctx context.Context, maxRetryCount
 	}
 
 	result, err := r.Client.Query(ctx, `
-		SELECT task_id, chat_id, user_id, target_chat_id, url, status, idempotency_key,
+		SELECT task_id, chat_id, user_id, target_peer, url, drop_caption, status, idempotency_key,
 		       retry_count, source_message_id, status_message_id, lease_id, output_summary, error_message, exit_code,
 		       created_at, updated_at, started_at, finished_at
 		FROM tasks
@@ -312,7 +314,7 @@ func (r *D1TaskRepository) ListRecentByUser(ctx context.Context, userID int64, l
 	}
 
 	result, err := r.Client.Query(ctx, `
-		SELECT task_id, chat_id, user_id, target_chat_id, url, status, idempotency_key,
+		SELECT task_id, chat_id, user_id, target_peer, url, drop_caption, status, idempotency_key,
 		       retry_count, source_message_id, status_message_id, lease_id, output_summary, error_message, exit_code,
 		       created_at, updated_at, started_at, finished_at
 		FROM tasks
@@ -391,11 +393,15 @@ func taskFromResultRow(row map[string]any) (service.Task, error) {
 	if err != nil {
 		return service.Task{}, err
 	}
-	targetChatID, err := mustInt64(row, "target_chat_id")
+	targetPeer, err := mustString(row, "target_peer")
 	if err != nil {
 		return service.Task{}, err
 	}
 	url, err := mustString(row, "url")
+	if err != nil {
+		return service.Task{}, err
+	}
+	dropCaption, err := mustBool(row, "drop_caption")
 	if err != nil {
 		return service.Task{}, err
 	}
@@ -424,8 +430,9 @@ func taskFromResultRow(row map[string]any) (service.Task, error) {
 		TaskID:         taskID,
 		ChatID:         chatID,
 		UserID:         userID,
-		TargetChatID:   targetChatID,
+		TargetPeer:     targetPeer,
 		URL:            url,
+		DropCaption:    dropCaption,
 		Status:         service.Status(status),
 		IdempotencyKey: idempotencyKey,
 		RetryCount:     retryCount,
@@ -491,6 +498,14 @@ func mustInt(row map[string]any, key string) (int, error) {
 		return 0, err
 	}
 	return int(v), nil
+}
+
+func mustBool(row map[string]any, key string) (bool, error) {
+	v, err := mustInt64(row, key)
+	if err != nil {
+		return false, err
+	}
+	return v != 0, nil
 }
 
 func mustTime(row map[string]any, key string) (time.Time, error) {
@@ -647,4 +662,11 @@ func nullableTime(v time.Time) any {
 		return nil
 	}
 	return v.UTC().Format(time.RFC3339Nano)
+}
+
+func boolToInt(v bool) int {
+	if v {
+		return 1
+	}
+	return 0
 }

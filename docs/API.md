@@ -38,13 +38,17 @@ Only one active downloader may use the same `TDL_NAMESPACE`/storage because `tdl
   "task_id": "uuid",
   "chat_id": 123456789,
   "user_id": 123456789,
+  "target_peer": "channel_name",
   "url": "https://t.me/c/xxx/123",
+  "drop_caption": false,
   "created_at": "2026-03-21T00:00:00Z"
 }
 ```
 
-- `target_chat_id` is optional.
-- If `target_chat_id` is omitted (or persisted as `0`), downloader will not pass `--to` and `tdl forward` defaults to `Saved Messages`.
+- `target_peer` is optional.
+- If `target_peer` is omitted or empty, downloader will not pass `--to` and `tdl forward` uses the default destination behavior.
+- `drop_caption=true` maps to `tdl forward --mode clone --edit '""'`.
+- `drop_caption=false` maps to `tdl forward --mode direct`.
 
 ### Status queue message (`CF_STATUS_QUEUE_ID`)
 
@@ -65,8 +69,9 @@ Only one active downloader may use the same `TDL_NAMESPACE`/storage because `tdl
 - `task_id`
 - `chat_id`
 - `user_id`
-- `target_chat_id` (optional in JSON output; `0` means unspecified destination)
+- `target_peer` (optional; empty means unspecified destination)
 - `url`
+- `drop_caption`
 - `status`
 - `created_at`
 - `updated_at`
@@ -90,7 +95,10 @@ Only one active downloader may use the same `TDL_NAMESPACE`/storage because `tdl
 
 ## Current behavior summary
 
-- Bot accepts Telegram URLs only.
+- Bot accepts Telegram URLs directly.
+- Bot also accepts `/forward <source_url> <target> [--drop-caption]`.
+- `/forward` target accepts public Telegram usernames/links and numeric chat IDs.
+- Private invite links such as `https://t.me/+...` are rejected.
 - Bot prefers webhook mode when `TELEGRAM_USE_WEBHOOK=true` and `TELEGRAM_WEBHOOK_URL` is set.
 - Polling mode always calls `deleteWebhook(drop_pending_updates=false)` before `getUpdates`.
 - Polling mode auto-recovers Telegram webhook conflicts (`error_code=409`) by reissuing `deleteWebhook`.

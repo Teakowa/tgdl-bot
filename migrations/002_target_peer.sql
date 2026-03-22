@@ -1,0 +1,6 @@
+ALTER TABLE tasks ADD COLUMN IF NOT EXISTS target_peer TEXT NOT NULL DEFAULT '';
+ALTER TABLE tasks ADD COLUMN IF NOT EXISTS drop_caption INTEGER NOT NULL DEFAULT 0;
+
+UPDATE tasks
+SET target_peer = ''
+WHERE target_peer IS NULL;

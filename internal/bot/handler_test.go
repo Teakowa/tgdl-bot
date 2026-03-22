@@ -373,7 +373,7 @@ func TestHandlerCreatesTaskFromURL(t *testing.T) {
 			TaskID:         req.TaskID,
 			ChatID:         req.ChatID,
 			UserID:         req.UserID,
-			TargetChatID:   req.TargetChatID,
+			TargetPeer:     req.TargetPeer,
 			URL:            req.URL,
 			IdempotencyKey: req.IdempotencyKey,
 			Status:         service.StatusQueued,
@@ -395,11 +395,79 @@ func TestHandlerCreatesTaskFromURL(t *testing.T) {
 	if len(q.messages) != 1 {
 		t.Fatalf("expected queue enqueue call, got %d", len(q.messages))
 	}
-	if capturedReq.TargetChatID != 0 {
-		t.Fatalf("expected create request target chat id to be omitted, got %d", capturedReq.TargetChatID)
+	if capturedReq.TargetPeer != "" {
+		t.Fatalf("expected create request target peer to be omitted, got %q", capturedReq.TargetPeer)
 	}
-	if q.messages[0].TargetChatID != 0 {
-		t.Fatalf("expected queue message target chat id to be omitted, got %d", q.messages[0].TargetChatID)
+	if q.messages[0].TargetPeer != "" {
+		t.Fatalf("expected queue message target peer to be omitted, got %q", q.messages[0].TargetPeer)
+	}
+	if q.messages[0].DropCaption {
+		t.Fatal("expected plain URL flow to preserve caption")
+	}
+}
+
+func TestHandlerForwardCommandCreatesTaskWithTargetPeerAndDropCaption(t *testing.T) {
+	q := &fakeQueue{}
+	tasks := &fakeTaskQuery{}
+	var capturedReq service.CreateQueuedTaskRequest
+	tasks.createFn = func(req service.CreateQueuedTaskRequest) (service.Task, error) {
+		capturedReq = req
+		return service.Task{
+			TaskID:         req.TaskID,
+			ChatID:         req.ChatID,
+			UserID:         req.UserID,
+			TargetPeer:     req.TargetPeer,
+			URL:            req.URL,
+			DropCaption:    req.DropCaption,
+			IdempotencyKey: req.IdempotencyKey,
+			Status:         service.StatusQueued,
+			CreatedAt:      time.Now().UTC(),
+		}, nil
+	}
+	h := Handler{Tasks: tasks, Queue: q}
+
+	reply, err := h.HandleText(context.Background(), 1, 1, "/forward https://t.me/c/1/2 https://t.me/channel_name --drop-caption")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(reply, "Task ID:") {
+		t.Fatalf("unexpected reply: %s", reply)
+	}
+	if capturedReq.TargetPeer != "channel_name" {
+		t.Fatalf("expected normalized target peer, got %+v", capturedReq)
+	}
+	if !capturedReq.DropCaption {
+		t.Fatalf("expected drop caption in create request, got %+v", capturedReq)
+	}
+	if len(q.messages) != 1 {
+		t.Fatalf("expected one enqueue, got %d", len(q.messages))
+	}
+	if q.messages[0].TargetPeer != "channel_name" || !q.messages[0].DropCaption {
+		t.Fatalf("unexpected enqueued message: %+v", q.messages[0])
+	}
+}
+
+func TestHandlerForwardCommandRejectsPrivateInviteLink(t *testing.T) {
+	h := Handler{Tasks: &fakeTaskQuery{}, Queue: &fakeQueue{}}
+
+	reply, err := h.HandleText(context.Background(), 1, 1, "/forward https://t.me/c/1/2 https://t.me/+abcde")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(reply, "私有邀请链接暂不支持") {
+		t.Fatalf("unexpected reply: %s", reply)
+	}
+}
+
+func TestHandlerForwardCommandRejectsInvalidSourceURL(t *testing.T) {
+	h := Handler{Tasks: &fakeTaskQuery{}, Queue: &fakeQueue{}}
+
+	reply, err := h.HandleText(context.Background(), 1, 1, "/forward https://example.com/post/1 channel_name")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(reply, "源链接必须是受支持的 Telegram 消息链接") {
+		t.Fatalf("unexpected reply: %s", reply)
 	}
 }
 
@@ -443,7 +511,7 @@ func TestHandlerDuplicateFailedTaskRebuildsAndEnqueues(t *testing.T) {
 			TaskID:         req.TaskID,
 			ChatID:         req.ChatID,
 			UserID:         req.UserID,
-			TargetChatID:   req.TargetChatID,
+			TargetPeer:     req.TargetPeer,
 			URL:            req.URL,
 			IdempotencyKey: req.IdempotencyKey,
 			Status:         service.StatusQueued,
@@ -497,7 +565,7 @@ func TestHandlerDuplicateDeadLetteredTaskRebuildsAndEnqueues(t *testing.T) {
 			TaskID:         req.TaskID,
 			ChatID:         req.ChatID,
 			UserID:         req.UserID,
-			TargetChatID:   req.TargetChatID,
+			TargetPeer:     req.TargetPeer,
 			URL:            req.URL,
 			IdempotencyKey: req.IdempotencyKey,
 			Status:         service.StatusQueued,
@@ -540,7 +608,7 @@ func TestHandlerRetryCommandRebuildsAndEnqueues(t *testing.T) {
 			TaskID:         req.TaskID,
 			ChatID:         req.ChatID,
 			UserID:         req.UserID,
-			TargetChatID:   req.TargetChatID,
+			TargetPeer:     req.TargetPeer,
 			URL:            req.URL,
 			IdempotencyKey: req.IdempotencyKey,
 			Status:         service.StatusQueued,
@@ -650,7 +718,7 @@ func TestHandlerCreateTaskEmitsLifecycleLogs(t *testing.T) {
 			TaskID:         req.TaskID,
 			ChatID:         req.ChatID,
 			UserID:         req.UserID,
-			TargetChatID:   req.TargetChatID,
+			TargetPeer:     req.TargetPeer,
 			URL:            req.URL,
 			IdempotencyKey: req.IdempotencyKey,
 			Status:         service.StatusQueued,

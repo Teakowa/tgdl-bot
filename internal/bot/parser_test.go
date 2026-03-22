@@ -23,3 +23,26 @@ func TestIsAllowedUser(t *testing.T) {
 		t.Fatal("expected user in whitelist to be allowed")
 	}
 }
+
+func TestNormalizeTargetPeer(t *testing.T) {
+	cases := []struct {
+		in   string
+		want string
+		ok   bool
+	}{
+		{in: "@channel_name", want: "channel_name", ok: true},
+		{in: "channel_name", want: "channel_name", ok: true},
+		{in: "https://t.me/channel_name", want: "channel_name", ok: true},
+		{in: "https://telegram.me/channel_name", want: "channel_name", ok: true},
+		{in: "-1001234567890", want: "-1001234567890", ok: true},
+		{in: "https://t.me/+privateInvite", want: "", ok: false},
+		{in: "https://example.com/channel_name", want: "", ok: false},
+	}
+
+	for _, c := range cases {
+		got, ok := NormalizeTargetPeer(c.in)
+		if ok != c.ok || got != c.want {
+			t.Fatalf("normalize %q: got (%q,%v) want (%q,%v)", c.in, got, ok, c.want, c.ok)
+		}
+	}
+}
