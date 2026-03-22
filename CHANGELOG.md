@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.1.0](https://github.com/Teakowa/tgdl-bot/compare/v1.0.0...v1.1.0) (2026-03-22)
+
+
+### Features
+
+* **bot:** add explicit forward target support ([39e4392](https://github.com/Teakowa/tgdl-bot/commit/39e43926c9a65b2d20e586cce106cc9b58ee5bed))
+* **bot:** add queue action menus ([2754eb8](https://github.com/Teakowa/tgdl-bot/commit/2754eb886aae77f05892187567e986f006aa82ec))
+
 ## 1.0.0 (2026-03-22)
 
 
