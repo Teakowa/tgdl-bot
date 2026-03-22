@@ -1,4 +1,9 @@
-# TGDL Bot
+# TGDL Bot ![GitHub go.mod Go version](https://img.shields.io/github/go-mod/go-version/teakowa/tgdl-bot)
+
+
+[![ci-test](https://github.com/Teakowa/tgdl-bot/actions/workflows/ci-test.yml/badge.svg)](https://github.com/Teakowa/tgdl-bot/actions/workflows/ci-test.yml)
+[![docker-publish](https://github.com/Teakowa/tgdl-bot/actions/workflows/docker-publish.yml/badge.svg)](https://github.com/Teakowa/tgdl-bot/actions/workflows/docker-publish.yml)
+
 
 Go-based Telegram message forwarding bot and downloader for the current production deployment model.
 
