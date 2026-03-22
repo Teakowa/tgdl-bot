@@ -69,68 +69,19 @@ On startup, downloader also re-enqueues historical failed/dead-lettered tasks th
 
 ## Docker compose
 
-### 1. Backward-compatible one-file deployment
+Use this file selection guide:
 
-Set `BOT_IMAGE_TAG` and `DOWNLOADER_IMAGE_TAG` in `.env`, then run:
+- Recommended production split deployment:
+  - `deploy/docker-compose.bot.yml`
+  - `deploy/docker-compose.downloader.yml`
+- Local/dev compose with locally built images:
+  - bot: `deploy/docker-compose.bot.yml` + `deploy/docker-compose.bot.build.yml`
+  - downloader: `deploy/docker-compose.downloader.yml` + `deploy/docker-compose.downloader.build.yml`
+- Compatibility single-host path (legacy style):
+  - `deploy/docker-compose.yml`
+  - optional local build override: `deploy/docker-compose.build.yml`
 
-```bash
-docker compose -f deploy/docker-compose.yml pull && docker compose -f deploy/docker-compose.yml up -d
-```
-
-`deploy/docker-compose.yml` keeps the legacy all-in-one deployment path.
-
-### 2. Split deployment (bot and downloader separate)
-
-Bot only:
-
-```bash
-docker compose -f deploy/docker-compose.bot.yml pull && docker compose -f deploy/docker-compose.bot.yml up -d
-```
-
-Downloader only:
-
-```bash
-docker compose -f deploy/docker-compose.downloader.yml pull && docker compose -f deploy/docker-compose.downloader.yml up -d
-```
-
-Scale downloader instances for parallel consumption:
-
-```bash
-docker compose -f deploy/docker-compose.downloader.yml up -d --scale downloader=3
-```
-
-### 3. Local/dev build overrides
-
-All-in-one local build:
-
-```bash
-docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.build.yml build --pull
-docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.build.yml up -d
-```
-
-Split local build (bot):
-
-```bash
-docker compose -f deploy/docker-compose.bot.yml -f deploy/docker-compose.bot.build.yml build --pull
-docker compose -f deploy/docker-compose.bot.yml -f deploy/docker-compose.bot.build.yml up -d
-```
-
-Split local build (downloader):
-
-```bash
-docker compose -f deploy/docker-compose.downloader.yml -f deploy/docker-compose.downloader.build.yml build --pull
-docker compose -f deploy/docker-compose.downloader.yml -f deploy/docker-compose.downloader.build.yml up -d --scale downloader=2
-```
-
-### 4. Initialize tdl session in downloader container context (first deployment only)
-
-Run this once before expecting downloader consumption to succeed:
-
-```bash
-docker compose -f deploy/docker-compose.downloader.yml run --rm --entrypoint /usr/local/bin/tdl downloader login -T qr -n default
-```
-
-This login state is persisted in `tgdl-tdl-session` volume.
+For full step-by-step procedures (local dev/test, production rollout, scaling, and `tdl login` bootstrap), see [docs/DEPLOY.md](docs/DEPLOY.md).
 
 ## Deployment notes
 
