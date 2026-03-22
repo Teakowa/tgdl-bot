@@ -66,6 +66,11 @@ func TestEditMessageTextSendsExpectedPayload(t *testing.T) {
 		ChatID:    123,
 		MessageID: 456,
 		Text:      "new text",
+		ReplyMarkup: &InlineKeyboardMarkup{
+			InlineKeyboard: [][]InlineKeyboardButton{
+				{{Text: "Delete", CallbackData: "qdel:task123"}},
+			},
+		},
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -82,6 +87,14 @@ func TestEditMessageTextSendsExpectedPayload(t *testing.T) {
 	}
 	if captured["text"] != "new text" {
 		t.Fatalf("unexpected text: %v", captured["text"])
+	}
+	replyMarkup, ok := captured["reply_markup"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected reply_markup object, got %T", captured["reply_markup"])
+	}
+	keyboard, ok := replyMarkup["inline_keyboard"].([]any)
+	if !ok || len(keyboard) != 1 {
+		t.Fatalf("unexpected inline keyboard payload: %v", replyMarkup["inline_keyboard"])
 	}
 }
 

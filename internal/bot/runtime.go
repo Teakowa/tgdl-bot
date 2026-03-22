@@ -246,6 +246,15 @@ func (r Runtime) processUpdate(ctx context.Context, update telegram.Update) {
 			r.log("set message reaction failed", "chat_id", outcome.ReactionRequest.ChatID, "message_id", outcome.ReactionRequest.MessageID, "error", err)
 		}
 	}
+	if outcome.EditRequest != nil {
+		if err := r.Client.EditMessageText(ctx, *outcome.EditRequest); err != nil {
+			if isMessageNotModifiedError(err) {
+				return
+			}
+			r.log("edit message failed", "chat_id", outcome.EditRequest.ChatID, "message_id", outcome.EditRequest.MessageID, "error", err)
+		}
+		return
+	}
 	if outcome.SendRequest == nil {
 		return
 	}
@@ -255,6 +264,17 @@ func (r Runtime) processUpdate(ctx context.Context, update telegram.Update) {
 		return
 	}
 	r.bindAndSyncTaskStatus(ctx, outcome, sentMessage)
+}
+
+func isMessageNotModifiedError(err error) bool {
+	var apiErr *telegram.APIRequestError
+	if !errors.As(err, &apiErr) {
+		return false
+	}
+	if apiErr.Method != "editMessageText" || apiErr.Code != 400 {
+		return false
+	}
+	return strings.Contains(strings.ToLower(apiErr.Description), "message is not modified")
 }
 
 func (r Runtime) useWebhookMode() bool {

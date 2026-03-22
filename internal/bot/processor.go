@@ -8,6 +8,7 @@ import (
 
 type UpdateOutcome struct {
 	SendRequest           *telegram.SendMessageRequest
+	EditRequest           *telegram.EditMessageTextRequest
 	ReactionRequest       *telegram.SetMessageReactionRequest
 	AnswerCallbackRequest *telegram.AnswerCallbackQueryRequest
 	TaskID                string
@@ -69,18 +70,14 @@ func (h Handler) HandleUpdate(ctx context.Context, update telegram.Update) (*Upd
 	if outcome.Reply == "" || update.CallbackQuery.Message == nil {
 		return result, nil
 	}
-	result.SendRequest = &telegram.SendMessageRequest{
+	if update.CallbackQuery.Message.Chat.ID == 0 || update.CallbackQuery.Message.MessageID <= 0 {
+		return result, nil
+	}
+	result.EditRequest = &telegram.EditMessageTextRequest{
 		ChatID:      update.CallbackQuery.Message.Chat.ID,
+		MessageID:   update.CallbackQuery.Message.MessageID,
 		Text:        outcome.Reply,
 		ReplyMarkup: outcome.ReplyMarkup,
-	}
-	if update.CallbackQuery.Message.MessageID > 0 {
-		replyToMessageID := update.CallbackQuery.Message.MessageID
-		result.SendRequest.ReplyToMessageID = &replyToMessageID
-	}
-	if result.SendRequest.ChatID == 0 {
-		result.SendRequest = nil
-		return result, nil
 	}
 	return result, nil
 }

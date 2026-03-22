@@ -248,6 +248,9 @@ func (c *HTTPClient) EditMessageText(ctx context.Context, req EditMessageTextReq
 	if req.DisableWebPagePreview {
 		payload["disable_web_page_preview"] = true
 	}
+	if req.ReplyMarkup != nil {
+		payload["reply_markup"] = req.ReplyMarkup
+	}
 
 	b, err := json.Marshal(payload)
 	if err != nil {

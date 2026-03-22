@@ -60,6 +60,7 @@ type EditMessageTextRequest struct {
 	Text                  string
 	ParseMode             string
 	DisableWebPagePreview bool
+	ReplyMarkup           *InlineKeyboardMarkup
 }
 
 type ReactionTypeEmoji struct {

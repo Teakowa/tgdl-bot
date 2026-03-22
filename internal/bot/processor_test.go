@@ -126,7 +126,10 @@ func TestHandleUpdateBuildsCallbackAnswerAndReply(t *testing.T) {
 	if outcome.AnswerCallbackRequest.CallbackQueryID != "cb-1" {
 		t.Fatalf("unexpected callback answer request: %+v", outcome.AnswerCallbackRequest)
 	}
-	if outcome.SendRequest == nil || outcome.SendRequest.ChatID != 10 || outcome.SendRequest.Text == "" {
-		t.Fatalf("expected callback reply send request, got %+v", outcome.SendRequest)
+	if outcome.EditRequest == nil || outcome.EditRequest.ChatID != 10 || outcome.EditRequest.MessageID != 77 || outcome.EditRequest.Text == "" {
+		t.Fatalf("expected callback edit request, got %+v", outcome.EditRequest)
+	}
+	if outcome.SendRequest != nil {
+		t.Fatalf("did not expect callback send request, got %+v", outcome.SendRequest)
 	}
 }

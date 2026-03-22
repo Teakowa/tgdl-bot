@@ -462,6 +462,52 @@ func TestRuntimeAnswersCallbackQuery(t *testing.T) {
 	if client.answeredCallbacks[0].CallbackQueryID != "cb-1" {
 		t.Fatalf("unexpected callback query id: %+v", client.answeredCallbacks[0])
 	}
+	if len(client.editedMessages) != 1 {
+		t.Fatalf("expected one callback message edit, got %+v", client.editedMessages)
+	}
+	if client.editedMessages[0].ChatID != 101 || client.editedMessages[0].MessageID != 77 {
+		t.Fatalf("unexpected callback edit target: %+v", client.editedMessages[0])
+	}
+	if len(client.sentMessages) != 0 {
+		t.Fatalf("did not expect callback to send new message, got %+v", client.sentMessages)
+	}
+}
+
+func TestRuntimeIgnoresMessageNotModifiedCallbackEdit(t *testing.T) {
+	client := &fakeTelegramClient{
+		editMessageErr: &telegram.APIRequestError{
+			Method:      "editMessageText",
+			Code:        400,
+			Description: "Bad Request: message is not modified",
+		},
+	}
+	runtime := Runtime{
+		Client:  client,
+		Handler: Handler{},
+	}
+
+	runtime.processUpdate(context.Background(), telegram.Update{
+		UpdateID: 1,
+		CallbackQuery: &telegram.CallbackQuery{
+			ID:   "cb-1",
+			From: telegram.User{ID: 202},
+			Message: &telegram.Message{
+				MessageID: 77,
+				Chat:      telegram.Chat{ID: 101},
+			},
+			Data: callbackDeleteNoPrefix + "task123456",
+		},
+	})
+
+	if len(client.answeredCallbacks) != 1 {
+		t.Fatalf("expected callback answer to be sent, got %+v", client.answeredCallbacks)
+	}
+	if len(client.editedMessages) != 1 {
+		t.Fatalf("expected edit attempt, got %+v", client.editedMessages)
+	}
+	if len(client.sentMessages) != 0 {
+		t.Fatalf("did not expect fallback send, got %+v", client.sentMessages)
+	}
 }
 
 func TestRuntimePingHandlerRespondsOK(t *testing.T) {
