@@ -150,6 +150,41 @@ func TestSendMessageIncludesReplyToMessageID(t *testing.T) {
 	}
 }
 
+func TestSendMessageIncludesReplyMarkup(t *testing.T) {
+	var captured map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer r.Body.Close()
+		if err := json.NewDecoder(r.Body).Decode(&captured); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"ok":true,"result":{"message_id":1,"chat":{"id":123},"text":"ok"}}`))
+	}))
+	defer server.Close()
+
+	client := NewHTTPClient(server.URL, "token", time.Second)
+	if _, err := client.SendMessage(context.Background(), SendMessageRequest{
+		ChatID: 123,
+		Text:   "ok",
+		ReplyMarkup: &InlineKeyboardMarkup{
+			InlineKeyboard: [][]InlineKeyboardButton{
+				{{Text: "Delete", CallbackData: "qdel:task123"}},
+			},
+		},
+	}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	replyMarkup, ok := captured["reply_markup"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected reply_markup object, got %T", captured["reply_markup"])
+	}
+	keyboard, ok := replyMarkup["inline_keyboard"].([]any)
+	if !ok || len(keyboard) != 1 {
+		t.Fatalf("unexpected inline keyboard payload: %v", replyMarkup["inline_keyboard"])
+	}
+}
+
 func TestSetWebhookSendsExpectedPayload(t *testing.T) {
 	var capturedPath string
 	var captured map[string]any
@@ -220,6 +255,40 @@ func TestDeleteWebhookSendsDropPendingFlag(t *testing.T) {
 	}
 	if dropPending {
 		t.Fatalf("expected drop_pending_updates=false, got true")
+	}
+}
+
+func TestAnswerCallbackQuerySendsExpectedPayload(t *testing.T) {
+	var capturedPath string
+	var captured map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		capturedPath = r.URL.Path
+		defer r.Body.Close()
+		if err := json.NewDecoder(r.Body).Decode(&captured); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"ok":true,"result":true}`))
+	}))
+	defer server.Close()
+
+	client := NewHTTPClient(server.URL, "token", time.Second)
+	err := client.AnswerCallbackQuery(context.Background(), AnswerCallbackQueryRequest{
+		CallbackQueryID: "cb-1",
+		Text:            "done",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if capturedPath != "/bottoken/answerCallbackQuery" {
+		t.Fatalf("unexpected path: %s", capturedPath)
+	}
+	if captured["callback_query_id"] != "cb-1" {
+		t.Fatalf("unexpected callback query id: %v", captured["callback_query_id"])
+	}
+	if captured["text"] != "done" {
+		t.Fatalf("unexpected callback text: %v", captured["text"])
 	}
 }
 

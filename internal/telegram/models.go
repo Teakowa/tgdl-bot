@@ -13,6 +13,7 @@ type Client interface {
 	SendMessage(ctx context.Context, req SendMessageRequest) (Message, error)
 	EditMessageText(ctx context.Context, req EditMessageTextRequest) error
 	SetMessageReaction(ctx context.Context, req SetMessageReactionRequest) error
+	AnswerCallbackQuery(ctx context.Context, req AnswerCallbackQueryRequest) error
 }
 
 const (
@@ -50,6 +51,7 @@ type SendMessageRequest struct {
 	ParseMode             string
 	DisableWebPagePreview bool
 	ReplyToMessageID      *int64
+	ReplyMarkup           *InlineKeyboardMarkup
 }
 
 type EditMessageTextRequest struct {
@@ -72,9 +74,25 @@ type SetMessageReactionRequest struct {
 	IsBig     bool                `json:"is_big,omitempty"`
 }
 
+type InlineKeyboardButton struct {
+	Text         string `json:"text"`
+	CallbackData string `json:"callback_data,omitempty"`
+}
+
+type InlineKeyboardMarkup struct {
+	InlineKeyboard [][]InlineKeyboardButton `json:"inline_keyboard"`
+}
+
+type AnswerCallbackQueryRequest struct {
+	CallbackQueryID string `json:"callback_query_id"`
+	Text            string `json:"text,omitempty"`
+	ShowAlert       bool   `json:"show_alert,omitempty"`
+}
+
 type Update struct {
-	UpdateID int64    `json:"update_id"`
-	Message  *Message `json:"message,omitempty"`
+	UpdateID      int64          `json:"update_id"`
+	Message       *Message       `json:"message,omitempty"`
+	CallbackQuery *CallbackQuery `json:"callback_query,omitempty"`
 }
 
 type Message struct {
@@ -98,6 +116,13 @@ type User struct {
 	FirstName string `json:"first_name"`
 	LastName  string `json:"last_name,omitempty"`
 	Username  string `json:"username,omitempty"`
+}
+
+type CallbackQuery struct {
+	ID      string   `json:"id"`
+	From    User     `json:"from"`
+	Message *Message `json:"message,omitempty"`
+	Data    string   `json:"data,omitempty"`
 }
 
 type APIRequestError struct {

@@ -16,8 +16,12 @@ type fakeRepo struct {
 	findByIDErr    error
 	findByIdemErr  error
 	deleteErr      error
+	deleteTaskRows int64
+	deleteTaskErr  error
 	listRecentResp []Task
 	listRecentErr  error
+	listActiveResp []Task
+	listActiveErr  error
 	listFailedResp []Task
 	listFailedErr  error
 	claimResp      Task
@@ -86,6 +90,13 @@ func (r *fakeRepo) ListRecentByUser(context.Context, int64, int) ([]Task, error)
 	return r.listRecentResp, nil
 }
 
+func (r *fakeRepo) ListActiveByUser(context.Context, int64, int) ([]Task, error) {
+	if r.listActiveErr != nil {
+		return nil, r.listActiveErr
+	}
+	return r.listActiveResp, nil
+}
+
 func (r *fakeRepo) ListFailedForRetry(context.Context, int, int) ([]Task, error) {
 	if r.listFailedErr != nil {
 		return nil, r.listFailedErr
@@ -98,6 +109,13 @@ func (r *fakeRepo) DeleteFailedByIdempotencyKey(_ context.Context, _ string) (in
 		return 0, r.deleteErr
 	}
 	return r.deleteRows, nil
+}
+
+func (r *fakeRepo) DeletePendingByUserTaskID(_ context.Context, _ int64, _ string) (int64, error) {
+	if r.deleteTaskErr != nil {
+		return 0, r.deleteTaskErr
+	}
+	return r.deleteTaskRows, nil
 }
 
 func (r *fakeRepo) ClaimForExecution(_ context.Context, _ string, _ string, _ time.Time) (Task, bool, error) {
@@ -185,6 +203,42 @@ func TestDeleteFailedByIdempotencyKey(t *testing.T) {
 	}
 	if rows != 2 {
 		t.Fatalf("expected 2 deleted rows, got %d", rows)
+	}
+}
+
+func TestDeletePendingTask(t *testing.T) {
+	svc := NewTaskService(&fakeRepo{deleteTaskRows: 1})
+	deleted, err := svc.DeletePendingTask(context.Background(), 1, "t1")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !deleted {
+		t.Fatal("expected deleted=true")
+	}
+}
+
+func TestDeletePendingTaskReturnsFalseWhenNoRows(t *testing.T) {
+	svc := NewTaskService(&fakeRepo{deleteTaskRows: 0})
+	deleted, err := svc.DeletePendingTask(context.Background(), 1, "t1")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if deleted {
+		t.Fatal("expected deleted=false")
+	}
+}
+
+func TestListActiveTasks(t *testing.T) {
+	svc := NewTaskService(&fakeRepo{
+		listActiveResp: []Task{{TaskID: "t1", Status: StatusRunning}},
+	})
+
+	tasks, err := svc.ListActiveTasks(context.Background(), 1, 20)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(tasks) != 1 || tasks[0].TaskID != "t1" {
+		t.Fatalf("unexpected tasks: %+v", tasks)
 	}
 }
 

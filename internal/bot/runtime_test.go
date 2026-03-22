@@ -18,16 +18,19 @@ type fakeTelegramClient struct {
 	updates           []telegram.GetUpdatesResponse
 	getUpdatesErrs    []error
 	getUpdatesCalls   int
+	getUpdatesReqs    []telegram.GetUpdatesRequest
 	sentMessages      []telegram.SendMessageRequest
 	editedMessages    []telegram.EditMessageTextRequest
 	setReactionCalled int
+	answeredCallbacks []telegram.AnswerCallbackQueryRequest
 	setWebhookReqs    []telegram.SetWebhookRequest
 	deleteWebhookReqs []telegram.DeleteWebhookRequest
 	setWebhookErr     error
 	deleteWebhookErr  error
 }
 
-func (f *fakeTelegramClient) GetUpdates(context.Context, telegram.GetUpdatesRequest) (telegram.GetUpdatesResponse, error) {
+func (f *fakeTelegramClient) GetUpdates(_ context.Context, req telegram.GetUpdatesRequest) (telegram.GetUpdatesResponse, error) {
+	f.getUpdatesReqs = append(f.getUpdatesReqs, req)
 	call := f.getUpdatesCalls
 	f.getUpdatesCalls++
 	if call < len(f.getUpdatesErrs) && f.getUpdatesErrs[call] != nil {
@@ -61,6 +64,11 @@ func (f *fakeTelegramClient) EditMessageText(_ context.Context, req telegram.Edi
 
 func (f *fakeTelegramClient) SetMessageReaction(_ context.Context, _ telegram.SetMessageReactionRequest) error {
 	f.setReactionCalled++
+	return nil
+}
+
+func (f *fakeTelegramClient) AnswerCallbackQuery(_ context.Context, req telegram.AnswerCallbackQueryRequest) error {
+	f.answeredCallbacks = append(f.answeredCallbacks, req)
 	return nil
 }
 
@@ -108,6 +116,19 @@ func TestRuntimeProcessesUpdate(t *testing.T) {
 	}
 	if client.deleteWebhookReqs[0].DropPendingUpdates {
 		t.Fatal("expected polling startup deleteWebhook with drop_pending_updates=false")
+	}
+	if len(client.getUpdatesReqs) == 0 {
+		t.Fatal("expected getUpdates request")
+	}
+	foundCallback := false
+	for _, typ := range client.getUpdatesReqs[0].AllowedUpdates {
+		if typ == "callback_query" {
+			foundCallback = true
+			break
+		}
+	}
+	if !foundCallback {
+		t.Fatalf("expected polling allowed updates to include callback_query, got %v", client.getUpdatesReqs[0].AllowedUpdates)
 	}
 }
 
@@ -236,6 +257,9 @@ func TestRuntimeWebhookModeSetsWebhookAndStartsServer(t *testing.T) {
 	if client.setWebhookReqs[0].URL != "https://example.com/bot-webhook" {
 		t.Fatalf("unexpected webhook url: %s", client.setWebhookReqs[0].URL)
 	}
+	if len(client.setWebhookReqs[0].AllowedUpdates) != 2 {
+		t.Fatalf("unexpected webhook allowed updates: %+v", client.setWebhookReqs[0].AllowedUpdates)
+	}
 	if len(client.deleteWebhookReqs) != 0 {
 		t.Fatalf("expected no deleteWebhook in webhook mode, got %d", len(client.deleteWebhookReqs))
 	}
@@ -290,5 +314,53 @@ func TestRuntimeWebhookHandlerProcessesUpdate(t *testing.T) {
 	}
 	if len(client.sentMessages) == 0 {
 		t.Fatal("expected webhook update to trigger reply")
+	}
+}
+
+func TestRuntimeAnswersCallbackQuery(t *testing.T) {
+	client := &fakeTelegramClient{
+		updates: []telegram.GetUpdatesResponse{
+			{
+				Ok: true,
+				Result: []telegram.Update{
+					{
+						UpdateID: 1,
+						CallbackQuery: &telegram.CallbackQuery{
+							ID:   "cb-1",
+							From: telegram.User{ID: 202},
+							Message: &telegram.Message{
+								MessageID: 77,
+								Chat:      telegram.Chat{ID: 101},
+							},
+							Data: callbackDeleteNoPrefix + "task123456",
+						},
+					},
+				},
+			},
+		},
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	runtime := Runtime{
+		Client:         client,
+		Handler:        Handler{},
+		PollInterval:   time.Millisecond,
+		PollLimit:      1,
+		TimeoutSeconds: 1,
+	}
+
+	go func() {
+		time.Sleep(10 * time.Millisecond)
+		cancel()
+	}()
+
+	_ = runtime.Run(ctx)
+	if len(client.answeredCallbacks) == 0 {
+		t.Fatal("expected callback answer to be sent")
+	}
+	if client.answeredCallbacks[0].CallbackQueryID != "cb-1" {
+		t.Fatalf("unexpected callback query id: %+v", client.answeredCallbacks[0])
 	}
 }

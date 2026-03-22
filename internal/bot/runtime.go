@@ -67,7 +67,7 @@ func (r Runtime) runPolling(ctx context.Context) error {
 			Offset:         offset,
 			Limit:          pollLimit,
 			TimeoutSeconds: timeoutSeconds,
-			AllowedUpdates: []string{"message"},
+			AllowedUpdates: []string{"message", "callback_query"},
 		})
 		if err != nil {
 			if telegram.IsAPIErrorCode(err, telegram.ErrorCodeConflict) {
@@ -100,7 +100,7 @@ func (r Runtime) runWebhook(ctx context.Context) error {
 	if err := r.Client.SetWebhook(ctx, telegram.SetWebhookRequest{
 		URL:            webhookURL,
 		SecretToken:    strings.TrimSpace(r.WebhookSecret),
-		AllowedUpdates: []string{"message"},
+		AllowedUpdates: []string{"message", "callback_query"},
 	}); err != nil {
 		return fmt.Errorf("bot runtime: setWebhook failed: %w", err)
 	}
@@ -167,6 +167,11 @@ func (r Runtime) processUpdate(ctx context.Context, update telegram.Update) {
 	}
 	if outcome == nil {
 		return
+	}
+	if outcome.AnswerCallbackRequest != nil {
+		if err := r.Client.AnswerCallbackQuery(ctx, *outcome.AnswerCallbackRequest); err != nil {
+			r.log("answer callback query failed", "callback_query_id", outcome.AnswerCallbackRequest.CallbackQueryID, "error", err)
+		}
 	}
 	if outcome.ReactionRequest != nil {
 		if err := r.Client.SetMessageReaction(ctx, *outcome.ReactionRequest); err != nil {

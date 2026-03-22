@@ -91,9 +91,11 @@ type TaskService interface {
 	CreateQueuedTask(ctx context.Context, req CreateQueuedTaskRequest) (Task, error)
 	GetTask(ctx context.Context, taskID string) (Task, error)
 	ListRecentTasks(ctx context.Context, userID int64, limit int) ([]Task, error)
+	ListActiveTasks(ctx context.Context, userID int64, limit int) ([]Task, error)
 	ListFailedTasksForRetry(ctx context.Context, maxRetryCount int, limit int) ([]Task, error)
 	FindByIdempotencyKey(ctx context.Context, idempotencyKey string) (Task, error)
 	DeleteFailedByIdempotencyKey(ctx context.Context, idempotencyKey string) (int64, error)
+	DeletePendingTask(ctx context.Context, userID int64, taskID string) (bool, error)
 	ClaimTaskForExecution(ctx context.Context, req ClaimTaskExecutionRequest) (Task, bool, error)
 	UpdateTask(ctx context.Context, taskID string, update TaskUpdate) error
 }

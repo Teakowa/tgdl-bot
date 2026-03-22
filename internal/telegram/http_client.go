@@ -191,6 +191,9 @@ func (c *HTTPClient) SendMessage(ctx context.Context, req SendMessageRequest) (M
 	if req.ReplyToMessageID != nil {
 		payload["reply_to_message_id"] = *req.ReplyToMessageID
 	}
+	if req.ReplyMarkup != nil {
+		payload["reply_markup"] = req.ReplyMarkup
+	}
 
 	b, err := json.Marshal(payload)
 	if err != nil {
@@ -330,6 +333,58 @@ func (c *HTTPClient) SetMessageReaction(ctx context.Context, req SetMessageReact
 	if !out.Ok {
 		return &APIRequestError{
 			Method:      "setMessageReaction",
+			Code:        out.ErrorCode,
+			Description: out.Description,
+		}
+	}
+	return nil
+}
+
+func (c *HTTPClient) AnswerCallbackQuery(ctx context.Context, req AnswerCallbackQueryRequest) error {
+	payload := map[string]any{
+		"callback_query_id": req.CallbackQueryID,
+	}
+	if strings.TrimSpace(req.Text) != "" {
+		payload["text"] = req.Text
+	}
+	if req.ShowAlert {
+		payload["show_alert"] = true
+	}
+
+	b, err := json.Marshal(payload)
+	if err != nil {
+		return err
+	}
+
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.methodURL("answerCallbackQuery"), bytes.NewReader(b))
+	if err != nil {
+		return err
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.httpClient.Do(httpReq)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return err
+	}
+
+	var out struct {
+		Ok          bool   `json:"ok"`
+		Result      bool   `json:"result"`
+		ErrorCode   int    `json:"error_code,omitempty"`
+		Description string `json:"description,omitempty"`
+	}
+	if err := json.Unmarshal(body, &out); err != nil {
+		return fmt.Errorf("telegram answerCallbackQuery decode: %w", err)
+	}
+	if !out.Ok {
+		return &APIRequestError{
+			Method:      "answerCallbackQuery",
 			Code:        out.ErrorCode,
 			Description: out.Description,
 		}

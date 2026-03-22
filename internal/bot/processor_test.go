@@ -100,3 +100,32 @@ func TestHandleUpdateCarriesTaskBindingMetadata(t *testing.T) {
 		t.Fatalf("expected source message id 77, got %d", outcome.SourceMessageID)
 	}
 }
+
+func TestHandleUpdateBuildsCallbackAnswerAndReply(t *testing.T) {
+	h := Handler{}
+
+	outcome, err := h.HandleUpdate(context.Background(), telegram.Update{
+		UpdateID: 1,
+		CallbackQuery: &telegram.CallbackQuery{
+			ID:   "cb-1",
+			From: telegram.User{ID: 20},
+			Message: &telegram.Message{
+				MessageID: 77,
+				Chat:      telegram.Chat{ID: 10},
+			},
+			Data: callbackDeleteNoPrefix + "task123456",
+		},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if outcome == nil || outcome.AnswerCallbackRequest == nil {
+		t.Fatalf("expected callback answer request, got %+v", outcome)
+	}
+	if outcome.AnswerCallbackRequest.CallbackQueryID != "cb-1" {
+		t.Fatalf("unexpected callback answer request: %+v", outcome.AnswerCallbackRequest)
+	}
+	if outcome.SendRequest == nil || outcome.SendRequest.ChatID != 10 || outcome.SendRequest.Text == "" {
+		t.Fatalf("expected callback reply send request, got %+v", outcome.SendRequest)
+	}
+}

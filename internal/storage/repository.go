@@ -17,8 +17,10 @@ type TaskRepository interface {
 	Update(ctx context.Context, task service.Task) error
 	FindByID(ctx context.Context, taskID string) (service.Task, error)
 	FindByIdempotencyKey(ctx context.Context, idempotencyKey string) (service.Task, error)
+	ListActiveByUser(ctx context.Context, userID int64, limit int) ([]service.Task, error)
 	ListFailedForRetry(ctx context.Context, maxRetryCount int, limit int) ([]service.Task, error)
 	DeleteFailedByIdempotencyKey(ctx context.Context, idempotencyKey string) (int64, error)
+	DeletePendingByUserTaskID(ctx context.Context, userID int64, taskID string) (int64, error)
 	ListRecentByUser(ctx context.Context, userID int64, limit int) ([]service.Task, error)
 	ClaimForExecution(ctx context.Context, taskID, leaseID string, startedAt time.Time) (service.Task, bool, error)
 }
@@ -152,6 +154,54 @@ func (r *D1TaskRepository) FindByIdempotencyKey(ctx context.Context, idempotency
 	return task, nil
 }
 
+func (r *D1TaskRepository) ListActiveByUser(ctx context.Context, userID int64, limit int) ([]service.Task, error) {
+	if r == nil || r.Client == nil {
+		return nil, errors.New("storage: nil d1 task repository")
+	}
+	if limit <= 0 {
+		limit = 20
+	}
+
+	result, err := r.Client.Query(ctx, `
+		SELECT task_id, chat_id, user_id, target_chat_id, url, status, idempotency_key,
+		       retry_count, source_message_id, status_message_id, lease_id, output_summary, error_message, exit_code,
+		       created_at, updated_at, started_at, finished_at
+		FROM tasks
+		WHERE user_id = ?
+		  AND status IN (?, ?, ?)
+		ORDER BY
+		  CASE status
+		    WHEN ? THEN 0
+		    WHEN ? THEN 1
+		    WHEN ? THEN 2
+		    ELSE 3
+		  END ASC,
+		  created_at ASC
+		LIMIT ?`,
+		userID,
+		string(service.StatusRunning),
+		string(service.StatusQueued),
+		string(service.StatusRetrying),
+		string(service.StatusRunning),
+		string(service.StatusRetrying),
+		string(service.StatusQueued),
+		limit,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("storage: list active tasks for user %d: %w", userID, err)
+	}
+
+	tasks := make([]service.Task, 0, len(result.Results))
+	for _, row := range result.Results {
+		task, err := taskFromResultRow(row)
+		if err != nil {
+			return nil, fmt.Errorf("storage: decode active task row: %w", err)
+		}
+		tasks = append(tasks, task)
+	}
+	return tasks, nil
+}
+
 func (r *D1TaskRepository) ListFailedForRetry(ctx context.Context, maxRetryCount int, limit int) ([]service.Task, error) {
 	if r == nil || r.Client == nil {
 		return nil, errors.New("storage: nil d1 task repository")
@@ -207,6 +257,27 @@ func (r *D1TaskRepository) DeleteFailedByIdempotencyKey(ctx context.Context, ide
 	)
 	if err != nil {
 		return 0, fmt.Errorf("storage: delete failed tasks by idempotency key %q: %w", idempotencyKey, err)
+	}
+	return result.Meta.Changes, nil
+}
+
+func (r *D1TaskRepository) DeletePendingByUserTaskID(ctx context.Context, userID int64, taskID string) (int64, error) {
+	if r == nil || r.Client == nil {
+		return 0, errors.New("storage: nil d1 task repository")
+	}
+
+	result, err := r.Client.Query(ctx, `
+		DELETE FROM tasks
+		WHERE task_id = ?
+		  AND user_id = ?
+		  AND status IN (?, ?)`,
+		taskID,
+		userID,
+		string(service.StatusQueued),
+		string(service.StatusRetrying),
+	)
+	if err != nil {
+		return 0, fmt.Errorf("storage: delete pending task %q for user %d: %w", taskID, userID, err)
 	}
 	return result.Meta.Changes, nil
 }

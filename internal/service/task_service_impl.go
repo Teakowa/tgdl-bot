@@ -15,8 +15,10 @@ type TaskRepository interface {
 	Update(ctx context.Context, task Task) error
 	FindByID(ctx context.Context, taskID string) (Task, error)
 	FindByIdempotencyKey(ctx context.Context, idempotencyKey string) (Task, error)
+	ListActiveByUser(ctx context.Context, userID int64, limit int) ([]Task, error)
 	ListFailedForRetry(ctx context.Context, maxRetryCount int, limit int) ([]Task, error)
 	DeleteFailedByIdempotencyKey(ctx context.Context, idempotencyKey string) (int64, error)
+	DeletePendingByUserTaskID(ctx context.Context, userID int64, taskID string) (int64, error)
 	ListRecentByUser(ctx context.Context, userID int64, limit int) ([]Task, error)
 	ClaimForExecution(ctx context.Context, taskID, leaseID string, startedAt time.Time) (Task, bool, error)
 }
@@ -97,6 +99,17 @@ func (s taskService) ListRecentTasks(ctx context.Context, userID int64, limit in
 	return tasks, nil
 }
 
+func (s taskService) ListActiveTasks(ctx context.Context, userID int64, limit int) ([]Task, error) {
+	if s.repo == nil {
+		return nil, errors.New("service: task repository is required")
+	}
+	tasks, err := s.repo.ListActiveByUser(ctx, userID, limit)
+	if err != nil {
+		return nil, fmt.Errorf("service: list active tasks: %w", err)
+	}
+	return tasks, nil
+}
+
 func (s taskService) ListFailedTasksForRetry(ctx context.Context, maxRetryCount int, limit int) ([]Task, error) {
 	if s.repo == nil {
 		return nil, errors.New("service: task repository is required")
@@ -137,6 +150,23 @@ func (s taskService) DeleteFailedByIdempotencyKey(ctx context.Context, idempoten
 		return 0, fmt.Errorf("service: delete failed tasks by idempotency key: %w", err)
 	}
 	return rows, nil
+}
+
+func (s taskService) DeletePendingTask(ctx context.Context, userID int64, taskID string) (bool, error) {
+	if s.repo == nil {
+		return false, errors.New("service: task repository is required")
+	}
+	if userID == 0 {
+		return false, errors.New("service: user id is required")
+	}
+	if strings.TrimSpace(taskID) == "" {
+		return false, errors.New("service: task id is required")
+	}
+	rows, err := s.repo.DeletePendingByUserTaskID(ctx, userID, strings.TrimSpace(taskID))
+	if err != nil {
+		return false, fmt.Errorf("service: delete pending task: %w", err)
+	}
+	return rows > 0, nil
 }
 
 func (s taskService) ClaimTaskForExecution(ctx context.Context, req ClaimTaskExecutionRequest) (Task, bool, error) {

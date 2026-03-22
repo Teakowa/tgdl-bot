@@ -62,7 +62,7 @@ func run(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 		"webhook_enabled", cfg.Telegram.UseWebhook,
 		"webhook_configured", cfg.Telegram.WebhookURL != "",
 		"webhook_addr", cfg.Telegram.WebhookListenAddr,
-		"commands", []string{"/start", "/help", "/status", "/last"},
+		"commands", []string{"/start", "/help", "/status", "/last", "/queue", "/delete", "/retry"},
 		"allowlist_size", len(handler.AllowedUserIDs),
 	)
 	client := telegram.NewHTTPClient(cfg.Telegram.APIBase, cfg.Telegram.BotToken, 35*time.Second)

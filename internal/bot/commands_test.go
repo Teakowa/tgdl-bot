@@ -10,7 +10,10 @@ func TestParseCommand(t *testing.T) {
 		{in: "/start", want: ParsedCommand{Name: CommandStart}},
 		{in: "/help", want: ParsedCommand{Name: CommandHelp}},
 		{in: "/last", want: ParsedCommand{Name: CommandLast}},
+		{in: "/queue", want: ParsedCommand{Name: CommandQueue}},
 		{in: "/status abc-123", want: ParsedCommand{Name: CommandStatus, TaskID: "abc-123"}},
+		{in: "/delete abc-123", want: ParsedCommand{Name: CommandDelete, TaskID: "abc-123"}},
+		{in: "/retry abc-123", want: ParsedCommand{Name: CommandRetry, TaskID: "abc-123"}},
 		{in: "https://t.me/c/1/2", want: ParsedCommand{Name: CommandUnknown}},
 	}
 

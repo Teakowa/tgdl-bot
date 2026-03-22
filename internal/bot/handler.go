@@ -14,6 +14,15 @@ import (
 	"tgdl-bot/internal/queue"
 	"tgdl-bot/internal/service"
 	"tgdl-bot/internal/tasknotify"
+	"tgdl-bot/internal/telegram"
+)
+
+const (
+	activeTaskListLimit     = 20
+	callbackDeletePrefix    = "qdel:"
+	callbackDeleteOKPrefix  = "qdelok:"
+	callbackDeleteNoPrefix  = "qdelno:"
+	callbackDeleteMinTaskID = 8
 )
 
 func BuildCommandReply(cmd ParsedCommand) string {
@@ -27,6 +36,9 @@ func BuildCommandReply(cmd ParsedCommand) string {
 			"/help",
 			"/status <task_id>",
 			"/last",
+			"/queue",
+			"/delete <task_id>",
+			"/retry <task_id>",
 		}, "\n")
 	case CommandStatus:
 		if cmd.TaskID == "" {
@@ -35,14 +47,15 @@ func BuildCommandReply(cmd ParsedCommand) string {
 		return fmt.Sprintf("任务状态查询已接收: %s", cmd.TaskID)
 	case CommandLast:
 		return "最近任务查询已接收（最多10条）。"
+	case CommandQueue:
+		return "活跃任务查询已接收（running/queued/retrying）。"
+	case CommandDelete:
+		return "用法: /delete <task_id>"
+	case CommandRetry:
+		return "用法: /retry <task_id>"
 	default:
 		return ""
 	}
-}
-
-type TaskQueryService interface {
-	GetTask(ctx context.Context, taskID string) (service.Task, error)
-	ListRecentTasks(ctx context.Context, userID int64, limit int) ([]service.Task, error)
 }
 
 type Handler struct {
@@ -62,8 +75,15 @@ func (h Handler) HandleText(ctx context.Context, userID, chatID int64, text stri
 
 type HandleTextOutcome struct {
 	Reply         string
+	ReplyMarkup   *telegram.InlineKeyboardMarkup
 	ReactionEmoji string
 	TaskID        string
+}
+
+type HandleCallbackOutcome struct {
+	Reply       string
+	ReplyMarkup *telegram.InlineKeyboardMarkup
+	AnswerText  string
 }
 
 func (h Handler) HandleTextWithOutcome(ctx context.Context, userID, chatID int64, text string) (HandleTextOutcome, error) {
@@ -99,113 +119,274 @@ func (h Handler) HandleTextWithOutcome(ctx context.Context, userID, chatID int64
 			return HandleTextOutcome{}, err
 		}
 		return HandleTextOutcome{Reply: formatLast(tasks)}, nil
+	case CommandQueue:
+		if h.Tasks == nil {
+			return HandleTextOutcome{Reply: "任务队列查询暂未启用。"}, nil
+		}
+		tasks, err := h.Tasks.ListActiveTasks(ctx, userID, activeTaskListLimit)
+		if err != nil {
+			return HandleTextOutcome{}, err
+		}
+		reply := formatQueue(tasks)
+		if len(tasks) == 0 {
+			return HandleTextOutcome{Reply: reply}, nil
+		}
+		return HandleTextOutcome{Reply: reply, ReplyMarkup: buildQueueDeleteKeyboard(tasks)}, nil
+	case CommandDelete:
+		if cmd.TaskID == "" {
+			return HandleTextOutcome{Reply: BuildCommandReply(cmd)}, nil
+		}
+		return h.handleDeleteByTaskID(ctx, userID, cmd.TaskID)
+	case CommandRetry:
+		if cmd.TaskID == "" {
+			return HandleTextOutcome{Reply: BuildCommandReply(cmd)}, nil
+		}
+		return h.retryTaskByTaskID(ctx, userID, cmd.TaskID)
 	default:
 		url, ok := ExtractTaskURL(text)
 		if !ok {
 			return HandleTextOutcome{}, nil
 		}
-		if h.Tasks == nil || h.Queue == nil {
-			return HandleTextOutcome{Reply: "任务创建暂未启用。"}, nil
-		}
+		return h.createTaskFromURL(ctx, userID, chatID, url)
+	}
+}
 
-		newTaskIDValue := newTaskID()
-		idempotencyKey := service.NewIdempotencyKey(userID, url)
-		h.logInfo("bot task request parsed",
+func (h Handler) HandleCallback(ctx context.Context, userID int64, callbackID, data string) (HandleCallbackOutcome, error) {
+	if !IsAllowedUser(h.AllowedUserIDs, userID) {
+		return HandleCallbackOutcome{AnswerText: "无权限"}, nil
+	}
+	if h.Tasks == nil {
+		return HandleCallbackOutcome{Reply: "任务操作暂未启用。", AnswerText: "暂不可用"}, nil
+	}
+
+	switch {
+	case strings.HasPrefix(data, callbackDeletePrefix):
+		taskID := parseCallbackTaskID(data, callbackDeletePrefix)
+		if taskID == "" {
+			return HandleCallbackOutcome{Reply: "无效任务 ID。", AnswerText: "参数错误"}, nil
+		}
+		task, err := h.Tasks.GetTask(ctx, taskID)
+		if err != nil {
+			if errors.Is(err, service.ErrTaskNotFound) {
+				return HandleCallbackOutcome{Reply: "任务不存在或已处理。", AnswerText: "任务不存在"}, nil
+			}
+			return HandleCallbackOutcome{}, err
+		}
+		if task.UserID != userID {
+			return HandleCallbackOutcome{Reply: "无权限删除该任务。", AnswerText: "无权限"}, nil
+		}
+		switch task.Status {
+		case service.StatusRunning:
+			return HandleCallbackOutcome{Reply: "任务正在执行中，无法删除。", AnswerText: "无法删除"}, nil
+		case service.StatusQueued, service.StatusRetrying:
+			return HandleCallbackOutcome{
+				Reply:       fmt.Sprintf("确认删除任务？\nTask ID: %s\nURL: %s", task.TaskID, task.URL),
+				ReplyMarkup: buildDeleteConfirmKeyboard(task.TaskID),
+				AnswerText:  "请确认删除",
+			}, nil
+		default:
+			return HandleCallbackOutcome{Reply: "仅可删除 queued/retrying 任务。", AnswerText: "状态不支持"}, nil
+		}
+	case strings.HasPrefix(data, callbackDeleteOKPrefix):
+		taskID := parseCallbackTaskID(data, callbackDeleteOKPrefix)
+		if taskID == "" {
+			return HandleCallbackOutcome{Reply: "无效任务 ID。", AnswerText: "参数错误"}, nil
+		}
+		outcome, err := h.handleDeleteByTaskID(ctx, userID, taskID)
+		if err != nil {
+			return HandleCallbackOutcome{}, err
+		}
+		answer := "删除失败"
+		if strings.Contains(outcome.Reply, "任务已删除") {
+			answer = "删除成功"
+		}
+		return HandleCallbackOutcome{Reply: outcome.Reply, AnswerText: answer}, nil
+	case strings.HasPrefix(data, callbackDeleteNoPrefix):
+		return HandleCallbackOutcome{Reply: "已取消删除。", AnswerText: "已取消"}, nil
+	default:
+		return HandleCallbackOutcome{AnswerText: "不支持的操作"}, nil
+	}
+}
+
+func (h Handler) createTaskFromURL(ctx context.Context, userID, chatID int64, url string) (HandleTextOutcome, error) {
+	if h.Tasks == nil || h.Queue == nil {
+		return HandleTextOutcome{Reply: "任务创建暂未启用。"}, nil
+	}
+
+	newTaskIDValue := newTaskID()
+	idempotencyKey := service.NewIdempotencyKey(userID, url)
+	h.logInfo("bot task request parsed",
+		"chat_id", chatID,
+		"user_id", userID,
+		"url", redactURL(url),
+		"idempotency_key_prefix", idempotencyKeyPrefix(idempotencyKey),
+	)
+
+	req := service.CreateQueuedTaskRequest{
+		TaskID:         newTaskIDValue,
+		ChatID:         chatID,
+		UserID:         userID,
+		URL:            url,
+		IdempotencyKey: idempotencyKey,
+	}
+	task, err := h.Tasks.CreateQueuedTask(ctx, req)
+	if err != nil {
+		h.logError("bot task create failed",
 			"chat_id", chatID,
 			"user_id", userID,
 			"url", redactURL(url),
-			"idempotency_key_prefix", idempotencyKeyPrefix(idempotencyKey),
+			"error", err,
 		)
-
-		req := service.CreateQueuedTaskRequest{
-			TaskID:         newTaskIDValue,
-			ChatID:         chatID,
-			UserID:         userID,
-			URL:            url,
-			IdempotencyKey: idempotencyKey,
-		}
-		task, err := h.Tasks.CreateQueuedTask(ctx, req)
-		if err != nil {
-			h.logError("bot task create failed",
-				"chat_id", chatID,
-				"user_id", userID,
-				"url", redactURL(url),
-				"error", err,
-			)
-			return HandleTextOutcome{Reply: "任务创建失败，请稍后重试。"}, nil
-		}
-		if task.TaskID != newTaskIDValue {
-			h.logInfo("bot task existing hit",
-				"task_id", task.TaskID,
-				"status", task.Status,
-				"rebuild", isRebuildableStatus(task.Status),
-				"idempotency_key_prefix", idempotencyKeyPrefix(idempotencyKey),
-			)
-			if isRebuildableStatus(task.Status) {
-				if _, err := h.Tasks.DeleteFailedByIdempotencyKey(ctx, idempotencyKey); err != nil {
-					h.logError("bot task rebuild cleanup failed",
-						"task_id", task.TaskID,
-						"status", task.Status,
-						"error", err,
-					)
-					return HandleTextOutcome{Reply: fmt.Sprintf("任务重建失败\nTask ID: %s", task.TaskID), ReactionEmoji: statusReaction(task.Status)}, nil
-				}
-
-				rebuildTaskID := newTaskID()
-				req.TaskID = rebuildTaskID
-				task, err = h.Tasks.CreateQueuedTask(ctx, req)
-				if err != nil {
-					h.logError("bot task rebuild create failed",
-						"task_id", rebuildTaskID,
-						"error", err,
-					)
-					return HandleTextOutcome{Reply: "任务重建失败，请稍后重试。", ReactionEmoji: statusReaction(service.StatusFailed)}, nil
-				}
-				if task.TaskID != rebuildTaskID {
-					h.logInfo("bot task rebuild dedup hit",
-						"task_id", task.TaskID,
-						"status", task.Status,
-					)
-					return HandleTextOutcome{
-						Reply:         fmt.Sprintf("任务已存在\nTask ID: %s\n状态: %s", task.TaskID, task.Status),
-						ReactionEmoji: statusReaction(task.Status),
-					}, nil
-				}
-				h.logInfo("bot task rebuilt",
-					"task_id", task.TaskID,
-					"status", task.Status,
-					"idempotency_key_prefix", idempotencyKeyPrefix(task.IdempotencyKey),
-				)
-				if err := h.enqueueTask(ctx, task); err != nil {
-					return HandleTextOutcome{Reply: fmt.Sprintf("任务重建后入队失败\nTask ID: %s", task.TaskID), ReactionEmoji: statusReaction(service.StatusFailed)}, nil
-				}
-				return HandleTextOutcome{
-					Reply:         tasknotify.FormatTaskStatusMessage(task),
-					ReactionEmoji: statusReaction(task.Status),
-					TaskID:        task.TaskID,
-				}, nil
-			}
-			return HandleTextOutcome{
-				Reply:         fmt.Sprintf("任务已存在\nTask ID: %s\n状态: %s", task.TaskID, task.Status),
-				ReactionEmoji: statusReaction(task.Status),
-			}, nil
-		}
-		h.logInfo("bot task created",
+		return HandleTextOutcome{Reply: "任务创建失败，请稍后重试。"}, nil
+	}
+	if task.TaskID != newTaskIDValue {
+		h.logInfo("bot task existing hit",
 			"task_id", task.TaskID,
 			"status", task.Status,
-			"idempotency_key_prefix", idempotencyKeyPrefix(task.IdempotencyKey),
-			"url", redactURL(task.URL),
+			"rebuild", isRebuildableStatus(task.Status),
+			"idempotency_key_prefix", idempotencyKeyPrefix(idempotencyKey),
 		)
-
-		if err := h.enqueueTask(ctx, task); err != nil {
-			return HandleTextOutcome{Reply: fmt.Sprintf("任务入队失败\nTask ID: %s", task.TaskID), ReactionEmoji: statusReaction(service.StatusFailed)}, nil
+		if isRebuildableStatus(task.Status) {
+			return h.rebuildTaskFromRequest(ctx, req, task)
 		}
 		return HandleTextOutcome{
-			Reply:         tasknotify.FormatTaskStatusMessage(task),
+			Reply:         fmt.Sprintf("任务已存在\nTask ID: %s\n状态: %s", task.TaskID, task.Status),
 			ReactionEmoji: statusReaction(task.Status),
-			TaskID:        task.TaskID,
 		}, nil
 	}
+	h.logInfo("bot task created",
+		"task_id", task.TaskID,
+		"status", task.Status,
+		"idempotency_key_prefix", idempotencyKeyPrefix(task.IdempotencyKey),
+		"url", redactURL(task.URL),
+	)
+
+	if err := h.enqueueTask(ctx, task); err != nil {
+		return HandleTextOutcome{Reply: fmt.Sprintf("任务入队失败\nTask ID: %s", task.TaskID), ReactionEmoji: statusReaction(service.StatusFailed)}, nil
+	}
+	return HandleTextOutcome{
+		Reply:         tasknotify.FormatTaskStatusMessage(task),
+		ReactionEmoji: statusReaction(task.Status),
+		TaskID:        task.TaskID,
+	}, nil
+}
+
+func (h Handler) handleDeleteByTaskID(ctx context.Context, userID int64, taskID string) (HandleTextOutcome, error) {
+	if h.Tasks == nil {
+		return HandleTextOutcome{Reply: "任务删除暂未启用。"}, nil
+	}
+	taskID = strings.TrimSpace(taskID)
+	if taskID == "" {
+		return HandleTextOutcome{Reply: "用法: /delete <task_id>"}, nil
+	}
+
+	task, err := h.Tasks.GetTask(ctx, taskID)
+	if err != nil {
+		if errors.Is(err, service.ErrTaskNotFound) {
+			return HandleTextOutcome{Reply: "任务不存在或已处理。"}, nil
+		}
+		return HandleTextOutcome{}, err
+	}
+	if task.UserID != userID {
+		return HandleTextOutcome{Reply: "无权限删除该任务。"}, nil
+	}
+	switch task.Status {
+	case service.StatusRunning:
+		return HandleTextOutcome{Reply: "任务正在执行中，无法删除。"}, nil
+	case service.StatusQueued, service.StatusRetrying:
+	default:
+		return HandleTextOutcome{Reply: "仅可删除 queued/retrying 任务。"}, nil
+	}
+
+	deleted, err := h.Tasks.DeletePendingTask(ctx, userID, taskID)
+	if err != nil {
+		return HandleTextOutcome{}, err
+	}
+	if !deleted {
+		return HandleTextOutcome{Reply: "任务状态已变化，请刷新 /queue。"}, nil
+	}
+	return HandleTextOutcome{Reply: fmt.Sprintf("任务已删除\nTask ID: %s", taskID)}, nil
+}
+
+func (h Handler) retryTaskByTaskID(ctx context.Context, userID int64, taskID string) (HandleTextOutcome, error) {
+	if h.Tasks == nil || h.Queue == nil {
+		return HandleTextOutcome{Reply: "任务重试暂未启用。"}, nil
+	}
+	taskID = strings.TrimSpace(taskID)
+	if taskID == "" {
+		return HandleTextOutcome{Reply: "用法: /retry <task_id>"}, nil
+	}
+
+	task, err := h.Tasks.GetTask(ctx, taskID)
+	if err != nil {
+		if errors.Is(err, service.ErrTaskNotFound) {
+			return HandleTextOutcome{Reply: "任务不存在。"}, nil
+		}
+		return HandleTextOutcome{}, err
+	}
+	if task.UserID != userID {
+		return HandleTextOutcome{Reply: "无权限重试该任务。"}, nil
+	}
+	if !isRebuildableStatus(task.Status) {
+		return HandleTextOutcome{
+			Reply:         fmt.Sprintf("任务当前状态不支持重试: %s", task.Status),
+			ReactionEmoji: statusReaction(task.Status),
+		}, nil
+	}
+
+	req := service.CreateQueuedTaskRequest{
+		TaskID:         newTaskID(),
+		ChatID:         task.ChatID,
+		UserID:         task.UserID,
+		TargetChatID:   task.TargetChatID,
+		URL:            task.URL,
+		IdempotencyKey: task.IdempotencyKey,
+	}
+	return h.rebuildTaskFromRequest(ctx, req, task)
+}
+
+func (h Handler) rebuildTaskFromRequest(ctx context.Context, req service.CreateQueuedTaskRequest, existing service.Task) (HandleTextOutcome, error) {
+	if _, err := h.Tasks.DeleteFailedByIdempotencyKey(ctx, req.IdempotencyKey); err != nil {
+		h.logError("bot task rebuild cleanup failed",
+			"task_id", existing.TaskID,
+			"status", existing.Status,
+			"error", err,
+		)
+		return HandleTextOutcome{Reply: fmt.Sprintf("任务重建失败\nTask ID: %s", existing.TaskID), ReactionEmoji: statusReaction(existing.Status)}, nil
+	}
+
+	rebuildTaskID := req.TaskID
+	task, err := h.Tasks.CreateQueuedTask(ctx, req)
+	if err != nil {
+		h.logError("bot task rebuild create failed",
+			"task_id", rebuildTaskID,
+			"error", err,
+		)
+		return HandleTextOutcome{Reply: "任务重建失败，请稍后重试。", ReactionEmoji: statusReaction(service.StatusFailed)}, nil
+	}
+	if task.TaskID != rebuildTaskID {
+		h.logInfo("bot task rebuild dedup hit",
+			"task_id", task.TaskID,
+			"status", task.Status,
+		)
+		return HandleTextOutcome{
+			Reply:         fmt.Sprintf("任务已存在\nTask ID: %s\n状态: %s", task.TaskID, task.Status),
+			ReactionEmoji: statusReaction(task.Status),
+		}, nil
+	}
+	h.logInfo("bot task rebuilt",
+		"task_id", task.TaskID,
+		"status", task.Status,
+		"idempotency_key_prefix", idempotencyKeyPrefix(task.IdempotencyKey),
+	)
+	if err := h.enqueueTask(ctx, task); err != nil {
+		return HandleTextOutcome{Reply: fmt.Sprintf("任务重建后入队失败\nTask ID: %s", task.TaskID), ReactionEmoji: statusReaction(service.StatusFailed)}, nil
+	}
+	return HandleTextOutcome{
+		Reply:         tasknotify.FormatTaskStatusMessage(task),
+		ReactionEmoji: statusReaction(task.Status),
+		TaskID:        task.TaskID,
+	}, nil
 }
 
 func (h Handler) BindTaskMessageRefs(ctx context.Context, taskID string, sourceMessageID, statusMessageID int64) (service.Task, error) {
@@ -322,6 +503,60 @@ func formatLast(tasks []service.Task) string {
 		lines = append(lines, fmt.Sprintf("- %s | %s | %s", task.TaskID, task.Status, task.URL))
 	}
 	return strings.Join(lines, "\n")
+}
+
+func formatQueue(tasks []service.Task) string {
+	if len(tasks) == 0 {
+		return "当前无执行中或排队中的任务。"
+	}
+
+	lines := make([]string, 0, len(tasks)+1)
+	lines = append(lines, "当前任务队列:")
+	for i, task := range tasks {
+		lines = append(lines, fmt.Sprintf("%d. %s | %s | %s", i+1, task.URL, task.TaskID, task.Status))
+	}
+	return strings.Join(lines, "\n")
+}
+
+func buildQueueDeleteKeyboard(tasks []service.Task) *telegram.InlineKeyboardMarkup {
+	if len(tasks) == 0 {
+		return nil
+	}
+	rows := make([][]telegram.InlineKeyboardButton, 0, len(tasks))
+	for i, task := range tasks {
+		rows = append(rows, []telegram.InlineKeyboardButton{{
+			Text:         fmt.Sprintf("删除 %d (%s)", i+1, shortTaskID(task.TaskID)),
+			CallbackData: callbackDeletePrefix + task.TaskID,
+		}})
+	}
+	return &telegram.InlineKeyboardMarkup{InlineKeyboard: rows}
+}
+
+func buildDeleteConfirmKeyboard(taskID string) *telegram.InlineKeyboardMarkup {
+	return &telegram.InlineKeyboardMarkup{
+		InlineKeyboard: [][]telegram.InlineKeyboardButton{
+			{
+				{Text: "确认删除", CallbackData: callbackDeleteOKPrefix + taskID},
+				{Text: "取消", CallbackData: callbackDeleteNoPrefix + taskID},
+			},
+		},
+	}
+}
+
+func parseCallbackTaskID(data, prefix string) string {
+	taskID := strings.TrimSpace(strings.TrimPrefix(data, prefix))
+	if len(taskID) < callbackDeleteMinTaskID {
+		return ""
+	}
+	return taskID
+}
+
+func shortTaskID(taskID string) string {
+	taskID = strings.TrimSpace(taskID)
+	if len(taskID) <= 8 {
+		return taskID
+	}
+	return taskID[:8]
 }
 
 func newTaskID() string {
