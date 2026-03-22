@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -572,8 +573,9 @@ type tdlStreamLineWriter struct {
 	taskID string
 	stream string
 
-	mu  sync.Mutex
-	buf bytes.Buffer
+	mu              sync.Mutex
+	buf             bytes.Buffer
+	pendingProgress string
 }
 
 func newTDLStreamLineWriter(logger *slog.Logger, level slog.Level, taskID, stream string) *tdlStreamLineWriter {
@@ -594,17 +596,17 @@ func (w *tdlStreamLineWriter) Write(p []byte) (int, error) {
 	defer w.mu.Unlock()
 
 	written := len(p)
-	for len(p) > 0 {
-		index := bytes.IndexByte(p, '\n')
+	remaining := p
+	for len(remaining) > 0 {
+		index, separator, width := nextSeparator(remaining)
 		if index < 0 {
-			_, _ = w.buf.Write(p)
+			_, _ = w.buf.Write(remaining)
 			break
 		}
 
-		_, _ = w.buf.Write(p[:index])
-		w.emitLocked(w.buf.String())
-		w.buf.Reset()
-		p = p[index+1:]
+		_, _ = w.buf.Write(remaining[:index])
+		w.emitCompletedLineLocked(separator)
+		remaining = remaining[index+width:]
 	}
 	return written, nil
 }
@@ -613,23 +615,110 @@ func (w *tdlStreamLineWriter) Flush() {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
-	if w.buf.Len() == 0 {
-		return
-	}
-	w.emitLocked(w.buf.String())
+	remaining := normalizeStreamLine(w.buf.String())
 	w.buf.Reset()
+	if remaining != "" && isLikelyProgressLine(remaining) {
+		w.pendingProgress = remaining
+	}
+	w.flushPendingProgressLocked()
+	if remaining != "" && !isLikelyProgressLine(remaining) {
+		w.emitLocked(remaining)
+	}
 }
 
 func (w *tdlStreamLineWriter) emitLocked(line string) {
-	if w.logger == nil {
+	if w.logger == nil || line == "" {
 		return
 	}
 
 	w.logger.Log(context.Background(), w.level, "downloader tdl stream output",
 		"task_id", w.taskID,
 		"stream", w.stream,
-		"line", strings.TrimSuffix(line, "\r"),
+		"line", line,
 	)
+}
+
+func nextSeparator(raw []byte) (index int, separator byte, width int) {
+	for i := 0; i < len(raw); i++ {
+		switch raw[i] {
+		case '\n':
+			return i, '\n', 1
+		case '\r':
+			if i+1 < len(raw) && raw[i+1] == '\n' {
+				return i, '\n', 2
+			}
+			return i, '\r', 1
+		}
+	}
+	return -1, 0, 0
+}
+
+func (w *tdlStreamLineWriter) emitCompletedLineLocked(separator byte) {
+	line := normalizeStreamLine(w.buf.String())
+	w.buf.Reset()
+	w.handleLineLocked(line, separator == '\r')
+}
+
+func (w *tdlStreamLineWriter) handleLineLocked(line string, isCarriageReturn bool) {
+	if line == "" {
+		return
+	}
+	if isCarriageReturn || isLikelyProgressLine(line) {
+		w.pendingProgress = line
+		return
+	}
+	w.emitLocked(line)
+}
+
+func (w *tdlStreamLineWriter) flushPendingProgressLocked() {
+	if w.pendingProgress == "" {
+		return
+	}
+	w.emitLocked(w.pendingProgress)
+	w.pendingProgress = ""
+}
+
+var percentTokenPattern = regexp.MustCompile(`\b\d{1,3}(?:\.\d+)?%`)
+var percentOnlyPattern = regexp.MustCompile(`^\d{1,3}(?:\.\d+)?%$`)
+
+func isLikelyProgressLine(line string) bool {
+	clean := strings.TrimSpace(strings.ToLower(line))
+	if clean == "" || !strings.Contains(clean, "%") {
+		return false
+	}
+	if !percentTokenPattern.MatchString(clean) {
+		return false
+	}
+	if percentOnlyPattern.MatchString(clean) {
+		return true
+	}
+
+	for _, marker := range []string{
+		"eta",
+		"/s",
+		"kb",
+		"mb",
+		"gb",
+		"ib",
+		"progress",
+		"download",
+		"remaining",
+		"elapsed",
+		" of ",
+		"[",
+		"]",
+		"(",
+		")",
+	} {
+		if strings.Contains(clean, marker) {
+			return true
+		}
+	}
+	return false
+}
+
+func normalizeStreamLine(line string) string {
+	return strings.TrimSuffix(line, "\r")
 }
 
 func sanitizeCommand(command []string) []string {

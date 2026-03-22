@@ -466,6 +466,66 @@ func TestQueuePullLoopEmitsTDLStreamLogs(t *testing.T) {
 	}
 }
 
+func TestTDLStreamLineWriterCRProgressLogsOnlyFinalLine(t *testing.T) {
+	capture := newLogCapture()
+	writer := newTDLStreamLineWriter(capture.Logger(), slog.LevelInfo, "t-cr", "stdout")
+
+	_, _ = writer.Write([]byte("10%\r20%\r100%\r"))
+	if got := collectTDLStreamLogs(capture.Records()); len(got) != 0 {
+		t.Fatalf("expected no immediate progress logs, got %+v", got)
+	}
+
+	writer.Flush()
+
+	logs := collectTDLStreamLogs(capture.Records())
+	if len(logs) != 1 {
+		t.Fatalf("expected one final progress log, got %+v", logs)
+	}
+	if logs[0].level != slog.LevelInfo || logs[0].stream != "stdout" || logs[0].line != "100%" {
+		t.Fatalf("unexpected final progress log: %+v", logs[0])
+	}
+}
+
+func TestTDLStreamLineWriterPercentProgressLogsOnlyFinalLine(t *testing.T) {
+	capture := newLogCapture()
+	writer := newTDLStreamLineWriter(capture.Logger(), slog.LevelInfo, "t-percent", "stdout")
+
+	_, _ = writer.Write([]byte("progress 10% eta 5s\nprogress 60% eta 2s\nprogress 100% eta 0s\n"))
+	if got := collectTDLStreamLogs(capture.Records()); len(got) != 0 {
+		t.Fatalf("expected no immediate progress logs, got %+v", got)
+	}
+
+	writer.Flush()
+
+	logs := collectTDLStreamLogs(capture.Records())
+	if len(logs) != 1 {
+		t.Fatalf("expected one final progress log, got %+v", logs)
+	}
+	if logs[0].line != "progress 100% eta 0s" {
+		t.Fatalf("expected final percent progress log, got %+v", logs[0])
+	}
+}
+
+func TestTDLStreamLineWriterRegularPercentLineNotSuppressed(t *testing.T) {
+	capture := newLogCapture()
+	writer := newTDLStreamLineWriter(capture.Logger(), slog.LevelWarn, "t-normal", "stderr")
+
+	_, _ = writer.Write([]byte("CPU usage 95% exceeds threshold\n"))
+	logs := collectTDLStreamLogs(capture.Records())
+	if len(logs) != 1 {
+		t.Fatalf("expected immediate stderr log, got %+v", logs)
+	}
+	if logs[0].level != slog.LevelWarn || logs[0].stream != "stderr" || logs[0].line != "CPU usage 95% exceeds threshold" {
+		t.Fatalf("unexpected stderr log: %+v", logs[0])
+	}
+
+	writer.Flush()
+	logs = collectTDLStreamLogs(capture.Records())
+	if len(logs) != 1 {
+		t.Fatalf("expected no extra log on flush, got %+v", logs)
+	}
+}
+
 func TestQueuePullLoopLogsInvalidMessageAck(t *testing.T) {
 	q := &fakeQueue{}
 	capture := newLogCapture()
@@ -562,6 +622,27 @@ func containsTDLStreamLog(records []slog.Record, level slog.Level, stream, line 
 	return false
 }
 
+type tdlStreamLogEntry struct {
+	level  slog.Level
+	stream string
+	line   string
+}
+
+func collectTDLStreamLogs(records []slog.Record) []tdlStreamLogEntry {
+	out := make([]tdlStreamLogEntry, 0)
+	for _, record := range records {
+		if record.Message != "downloader tdl stream output" {
+			continue
+		}
+		out = append(out, tdlStreamLogEntry{
+			level:  record.Level,
+			stream: recordAttrString(record, "stream"),
+			line:   recordAttrString(record, "line"),
+		})
+	}
+	return out
+}
+
 func recordAttrEquals(record slog.Record, key, want string) bool {
 	match := false
 	record.Attrs(func(attr slog.Attr) bool {
@@ -572,4 +653,16 @@ func recordAttrEquals(record slog.Record, key, want string) bool {
 		return true
 	})
 	return match
+}
+
+func recordAttrString(record slog.Record, key string) string {
+	value := ""
+	record.Attrs(func(attr slog.Attr) bool {
+		if attr.Key == key {
+			value = attr.Value.String()
+			return false
+		}
+		return true
+	})
+	return value
 }
