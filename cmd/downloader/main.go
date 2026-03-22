@@ -678,12 +678,37 @@ func (w *tdlStreamLineWriter) flushPendingProgressLocked() {
 	w.pendingProgress = ""
 }
 
+var ansiEscapePattern = regexp.MustCompile(`\x1b\[[0-9;?]*[ -/]*[@-~]`)
 var percentTokenPattern = regexp.MustCompile(`\b\d{1,3}(?:\.\d+)?%`)
 var percentOnlyPattern = regexp.MustCompile(`^\d{1,3}(?:\.\d+)?%$`)
+var byteTokenPattern = regexp.MustCompile(`\b\d+(?:\.\d+)?\s*(?:[kmgt]?i?b)\b`)
 
 func isLikelyProgressLine(line string) bool {
-	clean := strings.TrimSpace(strings.ToLower(line))
-	if clean == "" || !strings.Contains(clean, "%") {
+	clean := strings.TrimSpace(strings.ToLower(stripANSIEscapes(line)))
+	if clean == "" {
+		return false
+	}
+
+	if isPercentProgressLine(clean) {
+		return true
+	}
+
+	byteTokens := byteTokenPattern.FindAllString(clean, -1)
+	if len(byteTokens) >= 2 && strings.Contains(clean, "/") {
+		return true
+	}
+	if len(byteTokens) >= 1 && strings.Contains(clean, "/s") {
+		for _, marker := range []string{"eta", "remaining", "elapsed", "download", "progress"} {
+			if strings.Contains(clean, marker) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func isPercentProgressLine(clean string) bool {
+	if !strings.Contains(clean, "%") {
 		return false
 	}
 	if !percentTokenPattern.MatchString(clean) {
@@ -715,6 +740,10 @@ func isLikelyProgressLine(line string) bool {
 		}
 	}
 	return false
+}
+
+func stripANSIEscapes(line string) string {
+	return ansiEscapePattern.ReplaceAllString(line, "")
 }
 
 func normalizeStreamLine(line string) string {

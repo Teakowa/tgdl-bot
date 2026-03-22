@@ -506,6 +506,26 @@ func TestTDLStreamLineWriterPercentProgressLogsOnlyFinalLine(t *testing.T) {
 	}
 }
 
+func TestTDLStreamLineWriterByteProgressWithoutPercentLogsOnlyFinalLine(t *testing.T) {
+	capture := newLogCapture()
+	writer := newTDLStreamLineWriter(capture.Logger(), slog.LevelInfo, "t-byte", "stdout")
+
+	_, _ = writer.Write([]byte("12.3 MiB / 100.0 MiB 2.1 MiB/s\n64.0 MiB / 100.0 MiB 2.1 MiB/s\n"))
+	if got := collectTDLStreamLogs(capture.Records()); len(got) != 0 {
+		t.Fatalf("expected no immediate byte-progress logs, got %+v", got)
+	}
+
+	writer.Flush()
+
+	logs := collectTDLStreamLogs(capture.Records())
+	if len(logs) != 1 {
+		t.Fatalf("expected one final byte-progress log, got %+v", logs)
+	}
+	if logs[0].line != "64.0 MiB / 100.0 MiB 2.1 MiB/s" {
+		t.Fatalf("expected final byte-progress log, got %+v", logs[0])
+	}
+}
+
 func TestTDLStreamLineWriterRegularPercentLineNotSuppressed(t *testing.T) {
 	capture := newLogCapture()
 	writer := newTDLStreamLineWriter(capture.Logger(), slog.LevelWarn, "t-normal", "stderr")
