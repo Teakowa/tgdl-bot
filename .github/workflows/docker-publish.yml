@@ -65,7 +65,7 @@ jobs:
             type=semver,pattern={{major}}
 
       - name: Build and push bot image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: deploy/Dockerfile.bot
@@ -77,7 +77,7 @@ jobs:
           cache-to: type=gha,mode=max
 
       - name: Build and push downloader image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: deploy/Dockerfile.downloader
