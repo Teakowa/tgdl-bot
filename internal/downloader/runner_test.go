@@ -36,12 +36,48 @@ func TestBuildForwardArgs(t *testing.T) {
 	}
 }
 
-func TestBuildForwardArgsRequiresTargetChatID(t *testing.T) {
-	_, err := buildForwardArgs(DownloadRequest{
+func TestBuildForwardArgsOmitsTargetChatIDWhenUnset(t *testing.T) {
+	got, err := buildForwardArgs(DownloadRequest{
 		URL: "https://t.me/c/123/456",
 	})
-	if err == nil {
-		t.Fatal("expected missing target chat id error")
+	if err != nil {
+		t.Fatalf("buildForwardArgs returned error: %v", err)
+	}
+
+	want := []string{
+		"forward",
+		"--from", "https://t.me/c/123/456",
+		"--reconnect-timeout", "10m",
+	}
+
+	if len(got) != len(want) {
+		t.Fatalf("arg length mismatch: got %d want %d\n got=%v\nwant=%v", len(got), len(want), got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("arg %d mismatch: got %q want %q\n got=%v\nwant=%v", i, got[i], want[i], got, want)
+		}
+	}
+}
+
+func TestBuildForwardArgsKeepsNegativeTargetChatID(t *testing.T) {
+	got, err := buildForwardArgs(DownloadRequest{
+		URL:          "https://t.me/c/123/456",
+		TargetChatID: -1001234567890,
+	})
+	if err != nil {
+		t.Fatalf("buildForwardArgs returned error: %v", err)
+	}
+
+	hasTo := false
+	for i := range got {
+		if got[i] == "--to" && i+1 < len(got) && got[i+1] == "-1001234567890" {
+			hasTo = true
+			break
+		}
+	}
+	if !hasTo {
+		t.Fatalf("expected --to with negative chat id, got=%v", got)
 	}
 }
 

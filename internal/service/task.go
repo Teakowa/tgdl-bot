@@ -42,7 +42,7 @@ type Task struct {
 	TaskID          string     `json:"task_id"`
 	ChatID          int64      `json:"chat_id"`
 	UserID          int64      `json:"user_id"`
-	TargetChatID    int64      `json:"target_chat_id"`
+	TargetChatID    int64      `json:"target_chat_id,omitempty"`
 	URL             string     `json:"url"`
 	Status          Status     `json:"status"`
 	CreatedAt       time.Time  `json:"created_at"`

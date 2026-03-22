@@ -117,6 +117,24 @@ func TestCreateQueuedTaskReturnsExistingByIdempotency(t *testing.T) {
 	}
 }
 
+func TestCreateQueuedTaskAllowsMissingTargetChatID(t *testing.T) {
+	svc := NewTaskService(&fakeRepo{})
+
+	task, err := svc.CreateQueuedTask(context.Background(), CreateQueuedTaskRequest{
+		TaskID:         "new",
+		ChatID:         1,
+		UserID:         1,
+		URL:            "https://t.me/c/1/2",
+		IdempotencyKey: "k",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if task.TargetChatID != 0 {
+		t.Fatalf("expected target chat id to remain unset, got %d", task.TargetChatID)
+	}
+}
+
 func TestUpdateTaskAppliesStatusAndFinishedAt(t *testing.T) {
 	now := time.Now().UTC()
 	repo := &fakeRepo{byTaskID: map[string]Task{"t1": {TaskID: "t1", IdempotencyKey: "k", Status: StatusRunning}}}

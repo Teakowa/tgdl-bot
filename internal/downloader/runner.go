@@ -103,9 +103,6 @@ func buildForwardArgs(req DownloadRequest) ([]string, error) {
 	if req.URL == "" {
 		return nil, errors.New("downloader: URL is required")
 	}
-	if req.TargetChatID == 0 {
-		return nil, errors.New("downloader: target chat id is required")
-	}
 
 	matches := telegramURLPartsPattern.FindStringSubmatch(req.URL)
 	if len(matches) != 2 || matches[1] == "" {
@@ -115,9 +112,11 @@ func buildForwardArgs(req DownloadRequest) ([]string, error) {
 	args := []string{
 		"forward",
 		"--from", req.URL,
-		"--to", fmt.Sprintf("%d", req.TargetChatID),
-		"--reconnect-timeout", defaultReconnectTimeout,
 	}
+	if req.TargetChatID != 0 {
+		args = append(args, "--to", fmt.Sprintf("%d", req.TargetChatID))
+	}
+	args = append(args, "--reconnect-timeout", defaultReconnectTimeout)
 
 	if req.Namespace != "" {
 		args = append(args, "--ns", req.Namespace)

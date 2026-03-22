@@ -159,7 +159,9 @@ func TestHandlerTaskQueryError(t *testing.T) {
 func TestHandlerCreatesTaskFromURL(t *testing.T) {
 	q := &fakeQueue{}
 	tasks := &fakeTaskQuery{}
+	var capturedReq service.CreateQueuedTaskRequest
 	tasks.createFn = func(req service.CreateQueuedTaskRequest) (service.Task, error) {
+		capturedReq = req
 		return service.Task{
 			TaskID:         req.TaskID,
 			ChatID:         req.ChatID,
@@ -185,6 +187,12 @@ func TestHandlerCreatesTaskFromURL(t *testing.T) {
 	}
 	if len(q.messages) != 1 {
 		t.Fatalf("expected queue enqueue call, got %d", len(q.messages))
+	}
+	if capturedReq.TargetChatID != 0 {
+		t.Fatalf("expected create request target chat id to be omitted, got %d", capturedReq.TargetChatID)
+	}
+	if q.messages[0].TargetChatID != 0 {
+		t.Fatalf("expected queue message target chat id to be omitted, got %d", q.messages[0].TargetChatID)
 	}
 }
 

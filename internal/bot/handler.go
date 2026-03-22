@@ -121,7 +121,6 @@ func (h Handler) HandleTextWithOutcome(ctx context.Context, userID, chatID int64
 			TaskID:         newTaskIDValue,
 			ChatID:         chatID,
 			UserID:         userID,
-			TargetChatID:   chatID,
 			URL:            url,
 			IdempotencyKey: idempotencyKey,
 		}

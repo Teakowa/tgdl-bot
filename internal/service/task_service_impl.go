@@ -35,8 +35,8 @@ func (s taskService) CreateQueuedTask(ctx context.Context, req CreateQueuedTaskR
 	if req.TaskID == "" {
 		return Task{}, errors.New("service: task id is required")
 	}
-	if req.UserID == 0 || req.ChatID == 0 || req.TargetChatID == 0 {
-		return Task{}, errors.New("service: chat/user/target chat id are required")
+	if req.UserID == 0 || req.ChatID == 0 {
+		return Task{}, errors.New("service: chat/user id are required")
 	}
 	if strings.TrimSpace(req.URL) == "" {
 		return Task{}, errors.New("service: url is required")

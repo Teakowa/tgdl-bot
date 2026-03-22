@@ -29,17 +29,20 @@ Used by the downloader service to perform message forward work.
   "task_id": "uuid",
   "chat_id": 123456789,
   "user_id": 123456789,
-  "target_chat_id": 123456789,
   "url": "https://t.me/c/xxx/123",
   "created_at": "2026-03-21T00:00:00Z"
 }
 ```
+
+- `target_chat_id` is optional.
+- If `target_chat_id` is omitted (or persisted as `0`), downloader will not pass `--to` and `tdl forward` defaults to `Saved Messages`.
 
 ### Task entity
 
 - `task_id`
 - `chat_id`
 - `user_id`
+- `target_chat_id` (optional in JSON output; `0` means unspecified destination)
 - `url`
 - `status`
 - `created_at`

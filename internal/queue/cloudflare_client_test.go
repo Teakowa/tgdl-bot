@@ -95,6 +95,41 @@ func TestEnqueueUsesSingleBodyPayload(t *testing.T) {
 	}
 }
 
+func TestEnqueueOmitsTargetChatIDWhenUnset(t *testing.T) {
+	var captured map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer r.Body.Close()
+		if err := json.NewDecoder(r.Body).Decode(&captured); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"success":true}`))
+	}))
+	defer server.Close()
+
+	client := NewCloudflareClient("acc", "queue", "token", time.Second)
+	client.baseURL = server.URL
+
+	err := client.Enqueue(context.Background(), Message{
+		TaskID:    "t-no-target",
+		ChatID:    1,
+		UserID:    2,
+		URL:       "https://t.me/c/1/2",
+		CreatedAt: time.Now().UTC(),
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	body, ok := captured["body"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected body payload, got: %#v", captured["body"])
+	}
+	if _, exists := body["target_chat_id"]; exists {
+		t.Fatalf("expected target_chat_id to be omitted when unset, got: %#v", body)
+	}
+}
+
 func TestPullSkipsInvalidBodiesAndParsesJSONStringBody(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !strings.HasSuffix(r.URL.Path, "/messages/pull") {
