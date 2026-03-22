@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.2.1](https://github.com/Teakowa/tgdl-bot/compare/v1.2.0...v1.2.1) (2026-03-22)
+
+
+### Bug Fixes
+
+* **storage:** support D1 add-column migrations ([01832fb](https://github.com/Teakowa/tgdl-bot/commit/01832fbb7e71d31a0dccfdd5b98137f79d4f8e00))
+
 ## [1.2.0](https://github.com/Teakowa/tgdl-bot/compare/v1.1.0...v1.2.0) (2026-03-22)
 
 
