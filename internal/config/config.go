@@ -19,7 +19,6 @@ const (
 	defaultTDLNamespace             = "default"
 	defaultDownloaderWorkers        = 2
 	defaultTaskTimeoutMinutes       = 180
-	defaultSQLitePath               = "./data/tasks.db"
 	defaultLogLevel                 = "info"
 	defaultEnvironment              = "dev"
 )
@@ -31,7 +30,6 @@ type Config struct {
 	Telegram   TelegramConfig
 	Cloudflare CloudflareConfig
 	Downloader DownloaderConfig
-	Storage    StorageConfig
 }
 
 type TelegramConfig struct {
@@ -46,6 +44,7 @@ type TelegramConfig struct {
 
 type CloudflareConfig struct {
 	AccountID                string
+	D1DatabaseID             string
 	QueueID                  string
 	APIToken                 string
 	QueueBatchSize           int
@@ -61,10 +60,6 @@ type DownloaderConfig struct {
 	LoginCheckOnStart  bool
 	Workers            int
 	TaskTimeoutMinutes int
-}
-
-type StorageConfig struct {
-	SQLitePath string
 }
 
 func Load() (Config, error) {
@@ -83,6 +78,7 @@ func Load() (Config, error) {
 		},
 		Cloudflare: CloudflareConfig{
 			AccountID:                strings.TrimSpace(os.Getenv("CF_ACCOUNT_ID")),
+			D1DatabaseID:             strings.TrimSpace(os.Getenv("CF_D1_DATABASE_ID")),
 			QueueID:                  strings.TrimSpace(os.Getenv("CF_QUEUE_ID")),
 			APIToken:                 strings.TrimSpace(os.Getenv("CF_API_TOKEN")),
 			QueueBatchSize:           getIntEnv("CF_QUEUE_BATCH_SIZE", defaultCloudflareQueueBatchSize),
@@ -98,9 +94,6 @@ func Load() (Config, error) {
 			Workers:            getIntEnv("DOWNLOADER_WORKERS", defaultDownloaderWorkers),
 			TaskTimeoutMinutes: getIntEnv("TASK_TIMEOUT_MINUTES", defaultTaskTimeoutMinutes),
 		},
-		Storage: StorageConfig{
-			SQLitePath: getEnvOrDefault("SQLITE_PATH", defaultSQLitePath),
-		},
 	}
 
 	cfg.Telegram.AllowedUserIDs = parseInt64List(os.Getenv("TELEGRAM_ALLOWED_USER_IDS"))
@@ -108,6 +101,7 @@ func Load() (Config, error) {
 	var errs []error
 	validateRequired(&errs, "TELEGRAM_BOT_TOKEN", cfg.Telegram.BotToken)
 	validateRequired(&errs, "CF_ACCOUNT_ID", cfg.Cloudflare.AccountID)
+	validateRequired(&errs, "CF_D1_DATABASE_ID", cfg.Cloudflare.D1DatabaseID)
 	validateRequired(&errs, "CF_QUEUE_ID", cfg.Cloudflare.QueueID)
 	validateRequired(&errs, "CF_API_TOKEN", cfg.Cloudflare.APIToken)
 
@@ -138,9 +132,6 @@ func Load() (Config, error) {
 	}
 	if cfg.Downloader.Namespace == "" {
 		errs = append(errs, fmt.Errorf("TDL_NAMESPACE cannot be empty"))
-	}
-	if cfg.Storage.SQLitePath == "" {
-		errs = append(errs, fmt.Errorf("SQLITE_PATH cannot be empty"))
 	}
 
 	if len(errs) > 0 {

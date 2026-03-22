@@ -21,14 +21,10 @@ RUN --mount=type=cache,target=/go/pkg/mod \
 
 FROM gcr.io/distroless/static-debian12 AS runtime
 
-ENV SQLITE_PATH=/app/data/tasks.db
-
 WORKDIR /app
 
 COPY --from=builder /out/tgdl-bot /usr/local/bin/tgdl-bot
 
 EXPOSE 8080
-
-VOLUME ["/app/data"]
 
 ENTRYPOINT ["/usr/local/bin/tgdl-bot"]

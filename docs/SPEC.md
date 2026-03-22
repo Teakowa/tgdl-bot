@@ -6,18 +6,19 @@ Phase 1 forwarding scope for TGDL Bot.
 
 - Telegram bot entrypoint for URL intake and forward task enqueueing
 - Downloader entrypoint for queue consumption and `tdl` forward execution
-- SQLite-backed task persistence
+- D1-backed task persistence shared by bot and downloader
 - Basic idempotency and duplicate protection
 - Session preflight before downloader starts consuming tasks
+- Safe parallel downloader execution via atomic task claim
 
 ## Non-goals
 
 - Web frontend
-- Cloudflare Workers / Durable Objects / D1 dependency
+- Cloudflare Workers / Durable Objects runtime dependency
 - Object storage upload
 - Automatic Telegram re-upload
 - Complex permissions or multi-tenant behavior
-- Cross-machine sharding
+- Cross-machine queue sharding coordination beyond Cloudflare Queue + D1
 
 ## Required services
 
@@ -53,7 +54,7 @@ Phase 1 forwarding scope for TGDL Bot.
 2. Parse URL
 3. Generate `task_id`
 4. Generate `idempotency_key`
-5. Write task to SQLite as `queued`
+5. Write task to D1 as `queued`
 6. Enqueue to Cloudflare Queue
 7. Reply with queue confirmation or error
 
@@ -61,13 +62,12 @@ Phase 1 forwarding scope for TGDL Bot.
 
 1. Pull a batch from Cloudflare Queue
 2. Parse task body
-3. Check task state
-4. Skip and ack already completed tasks
-5. Mark task as `running`
-6. Execute `tdl` forward
-7. Persist result
-8. Ack success or retry/fail according to error type
-9. On service startup, re-enqueue failed/dead-lettered tasks that still have retry budget
+3. Atomically claim task (`queued`/`retrying` -> `running`) with lease ID
+4. If claim fails, ack the message because another downloader already owns it
+5. Execute `tdl` forward
+6. Persist result
+7. Ack success or retry/fail according to error type
+8. On service startup, re-enqueue failed/dead-lettered tasks that still have retry budget
 
 ## `tdl` invocation requirements
 
@@ -81,7 +81,7 @@ Phase 1 forwarding scope for TGDL Bot.
 ## Deployment prerequisite
 
 The downloader requires a pre-existing `tdl` login session.
-Run `tdl login` on the target machine before starting the downloader service.
+Run `tdl login` on each downloader host before starting downloader service on that host.
 
 ## Forwarding mode notes
 

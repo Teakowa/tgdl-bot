@@ -92,6 +92,13 @@ func (f *fakeTaskQuery) DeleteFailedByIdempotencyKey(_ context.Context, key stri
 	return 0, nil
 }
 
+func (f *fakeTaskQuery) ClaimTaskForExecution(context.Context, service.ClaimTaskExecutionRequest) (service.Task, bool, error) {
+	if f.err != nil {
+		return service.Task{}, false, f.err
+	}
+	return f.task, false, nil
+}
+
 func (f *fakeTaskQuery) UpdateTask(_ context.Context, taskID string, update service.TaskUpdate) error {
 	f.updateTaskCalls++
 	f.updatedTaskID = taskID

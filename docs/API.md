@@ -17,6 +17,10 @@ Used by the bot service to:
 
 Used by the bot service to enqueue tasks and by the downloader service to pull tasks.
 
+### Cloudflare D1 API
+
+Used by bot and downloader to read/write task state in a shared database.
+
 ### `tdl`
 
 Used by the downloader service to perform message forward work.
@@ -73,8 +77,9 @@ Used by the downloader service to perform message forward work.
 - Polling mode always calls `deleteWebhook(drop_pending_updates=false)` before `getUpdates`.
 - Polling mode auto-recovers Telegram webhook conflicts (`error_code=409`) by reissuing `deleteWebhook`.
 - Webhook requests are accepted only via `POST` and validated with `X-Telegram-Bot-Api-Secret-Token`.
-- Bot persists a queued forward task before enqueueing to Cloudflare Queue.
+- Bot persists a queued forward task in D1 before enqueueing to Cloudflare Queue.
 - Downloader performs session preflight before pulling tasks.
+- Downloader atomically claims task ownership (`queued`/`retrying` -> `running`) before execution.
 - Downloader startup re-enqueues failed/dead-lettered tasks still below retry cap.
 - Downloader uses `exec.CommandContext` for `tdl`.
 - Downloader captures stdout, stderr, exit code, and timeout behavior.

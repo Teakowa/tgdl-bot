@@ -46,13 +46,12 @@ RUN set -eux; \
 FROM gcr.io/distroless/base-debian12 AS runtime
 
 ENV TDL_BIN=/usr/local/bin/tdl
-ENV SQLITE_PATH=/app/data/tasks.db
 
 WORKDIR /app
 
 COPY --from=builder /out/tgdl-downloader /usr/local/bin/tgdl-downloader
 COPY --from=tdl-installer /usr/local/bin/tdl /usr/local/bin/tdl
 
-VOLUME ["/app/data", "/root/.tdl"]
+VOLUME ["/root/.tdl"]
 
 ENTRYPOINT ["/usr/local/bin/tgdl-downloader"]

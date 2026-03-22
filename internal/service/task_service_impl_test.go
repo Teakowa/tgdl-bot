@@ -20,6 +20,9 @@ type fakeRepo struct {
 	listRecentErr  error
 	listFailedResp []Task
 	listFailedErr  error
+	claimResp      Task
+	claimOK        bool
+	claimErr       error
 }
 
 func (r *fakeRepo) Create(_ context.Context, task Task) error {
@@ -95,6 +98,13 @@ func (r *fakeRepo) DeleteFailedByIdempotencyKey(_ context.Context, _ string) (in
 		return 0, r.deleteErr
 	}
 	return r.deleteRows, nil
+}
+
+func (r *fakeRepo) ClaimForExecution(_ context.Context, _ string, _ string, _ time.Time) (Task, bool, error) {
+	if r.claimErr != nil {
+		return Task{}, false, r.claimErr
+	}
+	return r.claimResp, r.claimOK, nil
 }
 
 func TestCreateQueuedTaskReturnsExistingByIdempotency(t *testing.T) {
@@ -189,5 +199,29 @@ func TestListFailedTasksForRetry(t *testing.T) {
 	}
 	if len(tasks) != 1 || tasks[0].TaskID != "t1" {
 		t.Fatalf("unexpected tasks: %+v", tasks)
+	}
+}
+
+func TestClaimTaskForExecution(t *testing.T) {
+	now := time.Now().UTC()
+	expected := Task{TaskID: "t1", Status: StatusRunning}
+	svc := NewTaskService(&fakeRepo{
+		claimResp: expected,
+		claimOK:   true,
+	})
+
+	task, claimed, err := svc.ClaimTaskForExecution(context.Background(), ClaimTaskExecutionRequest{
+		TaskID:    "t1",
+		LeaseID:   "lease-1",
+		StartedAt: now,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !claimed {
+		t.Fatal("expected claimed=true")
+	}
+	if task.TaskID != expected.TaskID || task.Status != expected.Status {
+		t.Fatalf("unexpected claimed task: %+v", task)
 	}
 }

@@ -12,11 +12,12 @@ All configuration is read from environment variables.
 - `TELEGRAM_WEBHOOK_LISTEN_ADDR`: optional listen address for webhook HTTP server, defaults to `:8080`
 - `TELEGRAM_ALLOWED_USER_IDS`: optional comma-separated allowlist of Telegram user IDs
 
-## Cloudflare Queue
+## Cloudflare (Queue + D1)
 
 - `CF_ACCOUNT_ID`: required Cloudflare account ID
+- `CF_D1_DATABASE_ID`: required Cloudflare D1 database ID
 - `CF_QUEUE_ID`: required Cloudflare queue ID
-- `CF_API_TOKEN`: required Cloudflare API token
+- `CF_API_TOKEN`: required Cloudflare API token (must include Queue + D1 permissions)
 - `CF_QUEUE_BATCH_SIZE`: optional batch size, defaults to `5`
 - `CF_QUEUE_VISIBILITY_TIMEOUT_MS`: optional visibility timeout in milliseconds, defaults to `900000`
 - `CF_QUEUE_PULL_INTERVAL_MS`: optional pull interval in milliseconds, defaults to `3000`
@@ -30,10 +31,6 @@ All configuration is read from environment variables.
 - `TDL_LOGIN_CHECK_ON_START`: optional boolean, defaults to `true`
 - `DOWNLOADER_WORKERS`: optional worker count, defaults to `2`
 - `TASK_TIMEOUT_MINUTES`: optional per-task timeout, defaults to `180` (3 hours, timeout tasks are marked failed and acked)
-
-## Storage
-
-- `SQLITE_PATH`: optional SQLite database path, defaults to `./data/tasks.db`
 
 ## Runtime
 
@@ -52,7 +49,7 @@ The phase 1 scaffold assumes:
 - webhook mode only when both `TELEGRAM_USE_WEBHOOK=true` and `TELEGRAM_WEBHOOK_URL` is set; otherwise long polling
 - polling mode deletes outgoing webhook (`drop_pending_updates=false`) before reading updates
 - polling conflict recovery automatically retries after deleting webhook on Telegram API conflict (`error_code=409`)
-- a single local SQLite database
+- D1 is the single task store for bot and downloader
 - one `tdl` namespace per downloader deployment
 - no interactive login at runtime
 - forward target defaults to sender context

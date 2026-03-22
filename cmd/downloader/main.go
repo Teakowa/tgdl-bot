@@ -3,7 +3,6 @@ package main
 import (
 	"bytes"
 	"context"
-	"database/sql"
 	"errors"
 	"fmt"
 	"io"
@@ -12,7 +11,6 @@ import (
 	neturl "net/url"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"regexp"
 	"strings"
 	"sync"
@@ -26,8 +24,6 @@ import (
 	"tgdl-bot/internal/storage"
 	"tgdl-bot/internal/tasknotify"
 	"tgdl-bot/internal/telegram"
-
-	_ "modernc.org/sqlite"
 )
 
 type preflightHook interface {
@@ -71,9 +67,9 @@ type queueConsumer interface {
 }
 
 type taskService interface {
-	GetTask(ctx context.Context, taskID string) (service.Task, error)
 	UpdateTask(ctx context.Context, taskID string, update service.TaskUpdate) error
 	ListFailedTasksForRetry(ctx context.Context, maxRetryCount int, limit int) ([]service.Task, error)
+	ClaimTaskForExecution(ctx context.Context, req service.ClaimTaskExecutionRequest) (service.Task, bool, error)
 }
 
 type taskStatusNotifier interface {
@@ -198,20 +194,15 @@ func main() {
 	}
 
 	logger := logging.New(cfg.LogLevel)
-	db, err := openSQLite(cfg.Storage.SQLitePath)
-	if err != nil {
-		logger.Error("downloader exited", "error", err)
-		os.Exit(1)
-	}
-	defer db.Close()
-
-	store := storage.NewSQLiteStore(db)
+	d1Client := storage.NewD1Client(
+		cfg.Cloudflare.AccountID,
+		cfg.Cloudflare.D1DatabaseID,
+		cfg.Cloudflare.APIToken,
+		20*time.Second,
+	)
+	store := storage.NewD1Store(d1Client)
 	if err := store.ApplyMigrations(context.Background(), storage.DefaultMigrations()...); err != nil {
-		logger.Error("downloader exited", "error", fmt.Errorf("apply sqlite migrations: %w", err))
-		os.Exit(1)
-	}
-	if err := storage.EnsureTaskColumns(context.Background(), db); err != nil {
-		logger.Error("downloader exited", "error", fmt.Errorf("ensure sqlite task columns: %w", err))
+		logger.Error("downloader exited", "error", fmt.Errorf("apply d1 migrations: %w", err))
 		os.Exit(1)
 	}
 
@@ -273,47 +264,31 @@ func (l queuePullLoop) processMessage(ctx context.Context, cfg config.Config, me
 		"lease_id", message.LeaseID,
 	)
 
-	task, err := l.tasks.GetTask(ctx, message.Body.TaskID)
+	task, claimed, err := l.tasks.ClaimTaskForExecution(ctx, service.ClaimTaskExecutionRequest{
+		TaskID:    message.Body.TaskID,
+		LeaseID:   message.LeaseID,
+		StartedAt: time.Now().UTC(),
+	})
 	if err != nil {
-		if errors.Is(err, service.ErrTaskNotFound) {
-			l.logger.Warn("downloader task missing, ack lease",
-				"task_id", message.Body.TaskID,
-				"lease_id", message.LeaseID,
-			)
-			_ = l.queue.Ack(ctx, []string{message.LeaseID})
-			return
-		}
-		l.logger.Error("load task failed", "task_id", message.Body.TaskID, "error", err)
+		l.logger.Error("claim task failed", "task_id", message.Body.TaskID, "error", err)
 		_ = l.queue.Retry(ctx, []string{message.LeaseID})
 		return
 	}
-
-	if task.Status == service.StatusDone {
+	if !claimed {
+		l.logger.Info("downloader task not claimable, ack lease",
+			"task_id", message.Body.TaskID,
+			"lease_id", message.LeaseID,
+		)
 		_ = l.queue.Ack(ctx, []string{message.LeaseID})
 		return
 	}
 
-	startedAt := time.Now().UTC()
-	leaseID := message.LeaseID
-	statusFrom := task.Status
-	if err := l.tasks.UpdateTask(ctx, task.TaskID, service.TaskUpdate{
-		Status:    service.StatusRunning,
-		LeaseID:   &leaseID,
-		StartedAt: &startedAt,
-	}); err != nil {
-		l.logger.Error("mark task running failed", "task_id", task.TaskID, "error", err)
-		_ = l.queue.Retry(ctx, []string{message.LeaseID})
-		return
-	}
 	l.logger.Info("downloader task state updated",
 		"task_id", task.TaskID,
 		"lease_id", message.LeaseID,
-		"status_from", statusFrom,
 		"status_to", service.StatusRunning,
 	)
 	task.Status = service.StatusRunning
-	task.LeaseID = &leaseID
-	task.StartedAt = &startedAt
 	task.ErrorMessage = nil
 	l.notifyTaskStatus(ctx, task)
 
@@ -783,26 +758,4 @@ func redactURL(raw string) string {
 		path = path[:18] + "..."
 	}
 	return fmt.Sprintf("%s://%s%s", u.Scheme, u.Host, path)
-}
-
-func openSQLite(path string) (*sql.DB, error) {
-	if path == "" {
-		return nil, errors.New("empty sqlite path")
-	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return nil, fmt.Errorf("create sqlite dir: %w", err)
-	}
-	db, err := sql.Open("sqlite", path)
-	if err != nil {
-		return nil, fmt.Errorf("open sqlite: %w", err)
-	}
-	if _, err := db.Exec("PRAGMA busy_timeout = 5000"); err != nil {
-		db.Close()
-		return nil, fmt.Errorf("set sqlite busy_timeout: %w", err)
-	}
-	if err := db.Ping(); err != nil {
-		db.Close()
-		return nil, fmt.Errorf("ping sqlite: %w", err)
-	}
-	return db, nil
 }

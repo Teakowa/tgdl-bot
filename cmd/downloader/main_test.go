@@ -69,11 +69,21 @@ func (q *fakeQueue) Retry(_ context.Context, leaseIDs []string) error {
 
 type fakeTasks struct {
 	task           service.Task
+	claimed        bool
+	claimErr       error
 	updates        []service.TaskUpdate
 	failedForRetry []service.Task
 }
 
-func (f *fakeTasks) GetTask(context.Context, string) (service.Task, error) { return f.task, nil }
+func (f *fakeTasks) ClaimTaskForExecution(_ context.Context, _ service.ClaimTaskExecutionRequest) (service.Task, bool, error) {
+	if f.claimErr != nil {
+		return service.Task{}, false, f.claimErr
+	}
+	if !f.claimed {
+		return service.Task{}, false, nil
+	}
+	return f.task, true, nil
+}
 func (f *fakeTasks) UpdateTask(_ context.Context, _ string, update service.TaskUpdate) error {
 	f.updates = append(f.updates, update)
 	return nil
@@ -108,6 +118,7 @@ func TestQueuePullLoopProcessMessageSuccessAcks(t *testing.T) {
 	q := &fakeQueue{}
 	notifier := &fakeNotifier{}
 	tasks := &fakeTasks{
+		claimed: true,
 		task: service.Task{
 			TaskID:       "t1",
 			URL:          "https://t.me/c/1/2",
@@ -145,10 +156,42 @@ func TestQueuePullLoopProcessMessageSuccessAcks(t *testing.T) {
 	}
 }
 
+func TestQueuePullLoopProcessMessageNotClaimableAcks(t *testing.T) {
+	q := &fakeQueue{}
+	tasks := &fakeTasks{
+		claimed: false,
+	}
+	loop := queuePullLoop{
+		logger: slog.Default(),
+		queue:  q,
+		tasks:  tasks,
+		runner: fakeRunnerImpl{build: func(context.Context, dl.DownloadRequest) (*exec.Cmd, error) {
+			return nil, errors.New("should not execute runner when claim fails")
+		}},
+		maxAttempts: 3,
+	}
+
+	loop.processMessage(context.Background(), config.Config{Downloader: config.DownloaderConfig{TaskTimeoutMinutes: 1}}, queue.ReceivedMessage{
+		LeaseID: "lease-not-claimable",
+		Body:    queue.Message{TaskID: "t1"},
+	})
+
+	if len(q.acked) != 1 || q.acked[0] != "lease-not-claimable" {
+		t.Fatalf("expected lease to be acked, got %+v", q.acked)
+	}
+	if len(q.retried) != 0 {
+		t.Fatalf("expected no retry, got %+v", q.retried)
+	}
+	if len(tasks.updates) != 0 {
+		t.Fatalf("expected no task updates, got %+v", tasks.updates)
+	}
+}
+
 func TestQueuePullLoopNotifierFailureDoesNotAffectAck(t *testing.T) {
 	q := &fakeQueue{}
 	notifier := &fakeNotifier{err: errors.New("notify failed")}
 	tasks := &fakeTasks{
+		claimed: true,
 		task: service.Task{
 			TaskID:       "t1",
 			URL:          "https://t.me/c/1/2",
@@ -180,6 +223,7 @@ func TestQueuePullLoopNotifierFailureDoesNotAffectAck(t *testing.T) {
 func TestQueuePullLoopProcessMessageNonRetryableAcks(t *testing.T) {
 	q := &fakeQueue{}
 	tasks := &fakeTasks{
+		claimed: true,
 		task: service.Task{
 			TaskID:       "t1",
 			URL:          "https://t.me/c/1/2",
@@ -209,8 +253,8 @@ func TestQueuePullLoopProcessMessageNonRetryableAcks(t *testing.T) {
 	if len(q.acked) != 1 || q.acked[0] != "lease-2" {
 		t.Fatalf("expected lease to be acked, got %+v", q.acked)
 	}
-	if len(tasks.updates) < 2 {
-		t.Fatalf("expected running and final update, got %d", len(tasks.updates))
+	if len(tasks.updates) < 1 {
+		t.Fatalf("expected final update, got %d", len(tasks.updates))
 	}
 	if tasks.updates[len(tasks.updates)-1].Status != service.StatusFailed {
 		t.Fatalf("expected failed status, got %s", tasks.updates[len(tasks.updates)-1].Status)
@@ -220,6 +264,7 @@ func TestQueuePullLoopProcessMessageNonRetryableAcks(t *testing.T) {
 func TestQueuePullLoopProcessMessageRetryableNetworkErrorRetries(t *testing.T) {
 	q := &fakeQueue{}
 	tasks := &fakeTasks{
+		claimed: true,
 		task: service.Task{
 			TaskID:       "t1",
 			URL:          "https://t.me/c/1/2",
@@ -249,8 +294,8 @@ func TestQueuePullLoopProcessMessageRetryableNetworkErrorRetries(t *testing.T) {
 	if len(q.acked) != 0 {
 		t.Fatalf("expected no ack for retryable failure, got %+v", q.acked)
 	}
-	if len(tasks.updates) < 2 {
-		t.Fatalf("expected running and final update, got %d", len(tasks.updates))
+	if len(tasks.updates) < 1 {
+		t.Fatalf("expected final update, got %d", len(tasks.updates))
 	}
 	final := tasks.updates[len(tasks.updates)-1]
 	if final.Status != service.StatusRetrying {
@@ -264,6 +309,7 @@ func TestQueuePullLoopProcessMessageRetryableNetworkErrorRetries(t *testing.T) {
 func TestQueuePullLoopProcessMessageRetryableExhaustedDeadLettered(t *testing.T) {
 	q := &fakeQueue{}
 	tasks := &fakeTasks{
+		claimed: true,
 		task: service.Task{
 			TaskID:       "t1",
 			URL:          "https://t.me/c/1/2",
@@ -394,6 +440,7 @@ func TestQueuePullLoopRunRequeuesFailedTasksOnStartup(t *testing.T) {
 func TestQueuePullLoopEmitsLifecycleLogs(t *testing.T) {
 	q := &fakeQueue{}
 	tasks := &fakeTasks{
+		claimed: true,
 		task: service.Task{
 			TaskID:       "t-log",
 			URL:          "https://t.me/c/1/2",
@@ -434,6 +481,7 @@ func TestQueuePullLoopEmitsLifecycleLogs(t *testing.T) {
 func TestQueuePullLoopEmitsTDLStreamLogs(t *testing.T) {
 	q := &fakeQueue{}
 	tasks := &fakeTasks{
+		claimed: true,
 		task: service.Task{
 			TaskID:       "t-stream",
 			URL:          "https://t.me/c/1/2",

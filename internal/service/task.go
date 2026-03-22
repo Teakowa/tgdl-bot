@@ -81,6 +81,12 @@ type TaskUpdate struct {
 	StatusMessageID *int64
 }
 
+type ClaimTaskExecutionRequest struct {
+	TaskID    string
+	LeaseID   string
+	StartedAt time.Time
+}
+
 type TaskService interface {
 	CreateQueuedTask(ctx context.Context, req CreateQueuedTaskRequest) (Task, error)
 	GetTask(ctx context.Context, taskID string) (Task, error)
@@ -88,6 +94,7 @@ type TaskService interface {
 	ListFailedTasksForRetry(ctx context.Context, maxRetryCount int, limit int) ([]Task, error)
 	FindByIdempotencyKey(ctx context.Context, idempotencyKey string) (Task, error)
 	DeleteFailedByIdempotencyKey(ctx context.Context, idempotencyKey string) (int64, error)
+	ClaimTaskForExecution(ctx context.Context, req ClaimTaskExecutionRequest) (Task, bool, error)
 	UpdateTask(ctx context.Context, taskID string, update TaskUpdate) error
 }
 

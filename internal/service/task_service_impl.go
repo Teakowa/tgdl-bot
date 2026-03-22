@@ -18,6 +18,7 @@ type TaskRepository interface {
 	ListFailedForRetry(ctx context.Context, maxRetryCount int, limit int) ([]Task, error)
 	DeleteFailedByIdempotencyKey(ctx context.Context, idempotencyKey string) (int64, error)
 	ListRecentByUser(ctx context.Context, userID int64, limit int) ([]Task, error)
+	ClaimForExecution(ctx context.Context, taskID, leaseID string, startedAt time.Time) (Task, bool, error)
 }
 
 type taskService struct {
@@ -136,6 +137,28 @@ func (s taskService) DeleteFailedByIdempotencyKey(ctx context.Context, idempoten
 		return 0, fmt.Errorf("service: delete failed tasks by idempotency key: %w", err)
 	}
 	return rows, nil
+}
+
+func (s taskService) ClaimTaskForExecution(ctx context.Context, req ClaimTaskExecutionRequest) (Task, bool, error) {
+	if s.repo == nil {
+		return Task{}, false, errors.New("service: task repository is required")
+	}
+	if strings.TrimSpace(req.TaskID) == "" {
+		return Task{}, false, errors.New("service: task id is required")
+	}
+	if strings.TrimSpace(req.LeaseID) == "" {
+		return Task{}, false, errors.New("service: lease id is required")
+	}
+	startedAt := req.StartedAt
+	if startedAt.IsZero() {
+		startedAt = time.Now().UTC()
+	}
+
+	task, claimed, err := s.repo.ClaimForExecution(ctx, strings.TrimSpace(req.TaskID), strings.TrimSpace(req.LeaseID), startedAt.UTC())
+	if err != nil {
+		return Task{}, false, fmt.Errorf("service: claim task for execution: %w", err)
+	}
+	return task, claimed, nil
 }
 
 func (s taskService) UpdateTask(ctx context.Context, taskID string, update TaskUpdate) error {

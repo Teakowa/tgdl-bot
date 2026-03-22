@@ -15,12 +15,13 @@ Go-based Telegram message forwarding bot and downloader scaffold for the phase 1
 - `tdl` installed and available on `PATH`
 - Telegram bot token
 - Cloudflare Queue credentials
-- SQLite storage path
+- Cloudflare D1 database ID
+- Cloudflare API token with Queue + D1 permissions
 
 ## Required deployment step
 
 The downloader service depends on an already initialized `tdl` session.
-Before running the downloader for the first time, log in on the target machine:
+Before running each downloader host for the first time, log in on that host:
 
 ```bash
 tdl login -T qr -n default
@@ -44,7 +45,7 @@ cp .env.example .env
 ./scripts/run-bot.sh
 ```
 
-The bot service reads Telegram, queue, storage, and runtime settings from the environment.
+The bot service reads Telegram, queue, D1, and runtime settings from the environment.
 Runtime mode selection:
 
 - Webhook mode: `TELEGRAM_USE_WEBHOOK=true` and `TELEGRAM_WEBHOOK_URL` is set.
@@ -68,7 +69,7 @@ On startup, downloader also re-enqueues historical failed/dead-lettered tasks th
 
 ## Docker compose
 
-### 1. Production start (prebuilt images only)
+### 1. Backward-compatible one-file deployment
 
 Set `BOT_IMAGE_TAG` and `DOWNLOADER_IMAGE_TAG` in `.env`, then run:
 
@@ -76,40 +77,67 @@ Set `BOT_IMAGE_TAG` and `DOWNLOADER_IMAGE_TAG` in `.env`, then run:
 docker compose -f deploy/docker-compose.yml pull && docker compose -f deploy/docker-compose.yml up -d
 ```
 
-`deploy/docker-compose.yml` is production-oriented and does not build images.
+`deploy/docker-compose.yml` keeps the legacy all-in-one deployment path.
 
-### 2. Local/dev start with build override
+### 2. Split deployment (bot and downloader separate)
+
+Bot only:
+
+```bash
+docker compose -f deploy/docker-compose.bot.yml pull && docker compose -f deploy/docker-compose.bot.yml up -d
+```
+
+Downloader only:
+
+```bash
+docker compose -f deploy/docker-compose.downloader.yml pull && docker compose -f deploy/docker-compose.downloader.yml up -d
+```
+
+Scale downloader instances for parallel consumption:
+
+```bash
+docker compose -f deploy/docker-compose.downloader.yml up -d --scale downloader=3
+```
+
+### 3. Local/dev build overrides
+
+All-in-one local build:
 
 ```bash
 docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.build.yml build --pull
 docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.build.yml up -d
 ```
 
-`deploy/docker-compose.build.yml` adds local build instructions and overrides images to `tgdl-bot:local` / `tgdl-downloader:local`.
-
-For a fully clean rebuild (refresh base images and ignore local build cache):
+Split local build (bot):
 
 ```bash
-docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.build.yml build --pull --no-cache
-docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.build.yml up -d
+docker compose -f deploy/docker-compose.bot.yml -f deploy/docker-compose.bot.build.yml build --pull
+docker compose -f deploy/docker-compose.bot.yml -f deploy/docker-compose.bot.build.yml up -d
 ```
 
-### 3. Initialize tdl session in container context (first deployment only)
+Split local build (downloader):
+
+```bash
+docker compose -f deploy/docker-compose.downloader.yml -f deploy/docker-compose.downloader.build.yml build --pull
+docker compose -f deploy/docker-compose.downloader.yml -f deploy/docker-compose.downloader.build.yml up -d --scale downloader=2
+```
+
+### 4. Initialize tdl session in downloader container context (first deployment only)
 
 Run this once before expecting downloader consumption to succeed:
 
 ```bash
-docker compose -f deploy/docker-compose.yml run --rm --entrypoint /usr/local/bin/tdl downloader login -T qr -n default
+docker compose -f deploy/docker-compose.downloader.yml run --rm --entrypoint /usr/local/bin/tdl downloader login -T qr -n default
 ```
 
-This login state is persisted in Docker volumes (`tgdl-data` and `tgdl-tdl-session`).
+This login state is persisted in `tgdl-tdl-session` volume.
 
 ## Deployment notes
 
-- The bot and downloader may run on the same machine or separately.
-- The downloader must not consume tasks until `tdl` session preflight succeeds.
+- Bot and downloader can run on the same machine or separately.
+- Task state is stored in D1; both services must point to the same `CF_D1_DATABASE_ID`.
+- Downloader must not consume tasks until `tdl` session preflight succeeds.
 - Task execution timeout defaults to 3 hours (`TASK_TIMEOUT_MINUTES=180`); timeout tasks are marked failed and removed from queue.
-- SQLite is used as the local task store; keep the database on persistent storage.
 - This phase does not include a web UI, object storage, or worker-based deployment.
 - Bot accepts Telegram message URLs only and creates forward tasks.
 - In webhook mode, route HTTPS traffic to bot listen address (`TELEGRAM_WEBHOOK_LISTEN_ADDR`, default `:8080`) and configure `TELEGRAM_WEBHOOK_SECRET`.

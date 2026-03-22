@@ -54,6 +54,19 @@ func TestLoadWebhookModeDefaultsListenAddr(t *testing.T) {
 	}
 }
 
+func TestLoadRequiresD1DatabaseID(t *testing.T) {
+	setBaseEnv(t)
+	t.Setenv("CF_D1_DATABASE_ID", "")
+
+	_, err := Load()
+	if err == nil {
+		t.Fatal("expected validation error")
+	}
+	if !strings.Contains(err.Error(), "CF_D1_DATABASE_ID") {
+		t.Fatalf("expected CF_D1_DATABASE_ID error, got %v", err)
+	}
+}
+
 func setBaseEnv(t *testing.T) {
 	t.Helper()
 	t.Setenv("TELEGRAM_BOT_TOKEN", "token")
@@ -64,6 +77,7 @@ func setBaseEnv(t *testing.T) {
 	t.Setenv("TELEGRAM_WEBHOOK_SECRET", "")
 	t.Setenv("TELEGRAM_WEBHOOK_LISTEN_ADDR", ":8080")
 	t.Setenv("CF_ACCOUNT_ID", "account")
+	t.Setenv("CF_D1_DATABASE_ID", "d1-db-id")
 	t.Setenv("CF_QUEUE_ID", "queue")
 	t.Setenv("CF_API_TOKEN", "api-token")
 	t.Setenv("CF_QUEUE_BATCH_SIZE", "5")
@@ -76,7 +90,6 @@ func setBaseEnv(t *testing.T) {
 	t.Setenv("TDL_LOGIN_CHECK_ON_START", "true")
 	t.Setenv("DOWNLOADER_WORKERS", "2")
 	t.Setenv("TASK_TIMEOUT_MINUTES", "180")
-	t.Setenv("SQLITE_PATH", "./data/tasks.db")
 	t.Setenv("LOG_LEVEL", "info")
 	t.Setenv("ENV", "test")
 }
