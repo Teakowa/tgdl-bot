@@ -257,6 +257,29 @@ func TestQueuePullLoopProcessMessageNotClaimableAcks(t *testing.T) {
 	}
 }
 
+func TestQueuePullLoopProcessMessagePausedTaskLeaseAcks(t *testing.T) {
+	q := &fakeQueue{}
+	tasks := &fakeTasks{claimed: false}
+	loop := queuePullLoop{
+		logger: slog.Default(),
+		queue:  q,
+		tasks:  tasks,
+		runner: fakeRunnerImpl{build: func(context.Context, dl.DownloadRequest) (*exec.Cmd, error) {
+			return nil, errors.New("should not execute runner for paused task")
+		}},
+		maxAttempts: 3,
+	}
+
+	loop.processMessage(context.Background(), config.Config{Downloader: config.DownloaderConfig{TaskTimeoutMinutes: 1}}, queue.ReceivedMessage{
+		LeaseID: "lease-paused",
+		Body:    queue.Message{TaskID: "paused-task"},
+	})
+
+	if len(q.acked) != 1 || q.acked[0] != "lease-paused" {
+		t.Fatalf("expected paused task lease to be acked, got %+v", q.acked)
+	}
+}
+
 func TestQueuePullLoopStatusPublishFailureDoesNotAffectAck(t *testing.T) {
 	q := &fakeQueue{}
 	statusQueue := &fakeQueue{enqueueErr: errors.New("publish failed")}

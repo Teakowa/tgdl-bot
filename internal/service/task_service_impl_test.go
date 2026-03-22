@@ -20,10 +20,18 @@ type fakeRepo struct {
 	deleteTaskErr        error
 	deleteNonRunningRows int64
 	deleteNonRunningErr  error
+	pauseRows            int64
+	pauseErr             error
+	resumeRows           int64
+	resumeErr            error
+	cancelRows           int64
+	cancelErr            error
 	listRecentResp       []Task
 	listRecentErr        error
 	listActiveResp       []Task
 	listActiveErr        error
+	listQueueResp        []Task
+	listQueueErr         error
 	listFailedResp       []Task
 	listFailedErr        error
 	claimResp            Task
@@ -99,6 +107,13 @@ func (r *fakeRepo) ListActiveByUser(context.Context, int64, int) ([]Task, error)
 	return r.listActiveResp, nil
 }
 
+func (r *fakeRepo) ListQueueByUser(context.Context, int64, int) ([]Task, error) {
+	if r.listQueueErr != nil {
+		return nil, r.listQueueErr
+	}
+	return r.listQueueResp, nil
+}
+
 func (r *fakeRepo) ListFailedForRetry(context.Context, int, int) ([]Task, error) {
 	if r.listFailedErr != nil {
 		return nil, r.listFailedErr
@@ -125,6 +140,27 @@ func (r *fakeRepo) DeleteNonRunningByUserTaskID(_ context.Context, _ int64, _ st
 		return 0, r.deleteNonRunningErr
 	}
 	return r.deleteNonRunningRows, nil
+}
+
+func (r *fakeRepo) PauseByUserTaskID(_ context.Context, _ int64, _ string, _ time.Time) (int64, error) {
+	if r.pauseErr != nil {
+		return 0, r.pauseErr
+	}
+	return r.pauseRows, nil
+}
+
+func (r *fakeRepo) ResumeByUserTaskID(_ context.Context, _ int64, _ string, _ time.Time) (int64, error) {
+	if r.resumeErr != nil {
+		return 0, r.resumeErr
+	}
+	return r.resumeRows, nil
+}
+
+func (r *fakeRepo) CancelByUserTaskID(_ context.Context, _ int64, _ string, _ time.Time) (int64, error) {
+	if r.cancelErr != nil {
+		return 0, r.cancelErr
+	}
+	return r.cancelRows, nil
 }
 
 func (r *fakeRepo) ClaimForExecution(_ context.Context, _ string, _ string, _ time.Time) (Task, bool, error) {
@@ -279,12 +315,59 @@ func TestDeleteTaskNonRunningReturnsFalseWhenNoRows(t *testing.T) {
 	}
 }
 
+func TestPauseTask(t *testing.T) {
+	svc := NewTaskService(&fakeRepo{pauseRows: 1})
+	paused, err := svc.PauseTask(context.Background(), 1, "t1")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !paused {
+		t.Fatal("expected paused=true")
+	}
+}
+
+func TestResumeTask(t *testing.T) {
+	svc := NewTaskService(&fakeRepo{resumeRows: 1})
+	resumed, err := svc.ResumeTask(context.Background(), 1, "t1")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !resumed {
+		t.Fatal("expected resumed=true")
+	}
+}
+
+func TestCancelTask(t *testing.T) {
+	svc := NewTaskService(&fakeRepo{cancelRows: 1})
+	cancelled, err := svc.CancelTask(context.Background(), 1, "t1")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !cancelled {
+		t.Fatal("expected cancelled=true")
+	}
+}
+
 func TestListActiveTasks(t *testing.T) {
 	svc := NewTaskService(&fakeRepo{
 		listActiveResp: []Task{{TaskID: "t1", Status: StatusRunning}},
 	})
 
 	tasks, err := svc.ListActiveTasks(context.Background(), 1, 20)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(tasks) != 1 || tasks[0].TaskID != "t1" {
+		t.Fatalf("unexpected tasks: %+v", tasks)
+	}
+}
+
+func TestListQueueTasks(t *testing.T) {
+	svc := NewTaskService(&fakeRepo{
+		listQueueResp: []Task{{TaskID: "t1", Status: StatusPaused}},
+	})
+
+	tasks, err := svc.ListQueueTasks(context.Background(), 1, 20)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

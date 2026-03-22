@@ -17,14 +17,21 @@ type fakeTaskQuery struct {
 	task                 service.Task
 	tasks                []service.Task
 	activeTasks          []service.Task
+	queueTasks           []service.Task
 	err                  error
 	createFn             func(service.CreateQueuedTaskRequest) (service.Task, error)
 	getTaskFn            func(string) (service.Task, error)
 	deleteFailedFn       func(string) (int64, error)
 	deletePendingFn      func(int64, string) (bool, error)
 	deleteNonRunningFn   func(int64, string) (bool, error)
+	pauseFn              func(int64, string) (bool, error)
+	resumeFn             func(int64, string) (bool, error)
+	cancelFn             func(int64, string) (bool, error)
 	deletePendingResp    bool
 	deleteNonRunningResp bool
+	pauseResp            bool
+	resumeResp           bool
+	cancelResp           bool
 	updateTaskCalls      int
 	lastUpdate           *service.TaskUpdate
 	updatedTaskID        string
@@ -84,6 +91,16 @@ func (f *fakeTaskQuery) ListActiveTasks(context.Context, int64, int) ([]service.
 	return f.activeTasks, nil
 }
 
+func (f *fakeTaskQuery) ListQueueTasks(context.Context, int64, int) ([]service.Task, error) {
+	if f.err != nil {
+		return nil, f.err
+	}
+	if f.queueTasks != nil {
+		return f.queueTasks, nil
+	}
+	return f.activeTasks, nil
+}
+
 func (f *fakeTaskQuery) ListFailedTasksForRetry(context.Context, int, int) ([]service.Task, error) {
 	if f.err != nil {
 		return nil, f.err
@@ -126,6 +143,36 @@ func (f *fakeTaskQuery) DeleteTaskNonRunning(_ context.Context, userID int64, ta
 		return false, f.err
 	}
 	return f.deleteNonRunningResp, nil
+}
+
+func (f *fakeTaskQuery) PauseTask(_ context.Context, userID int64, taskID string) (bool, error) {
+	if f.pauseFn != nil {
+		return f.pauseFn(userID, taskID)
+	}
+	if f.err != nil {
+		return false, f.err
+	}
+	return f.pauseResp, nil
+}
+
+func (f *fakeTaskQuery) ResumeTask(_ context.Context, userID int64, taskID string) (bool, error) {
+	if f.resumeFn != nil {
+		return f.resumeFn(userID, taskID)
+	}
+	if f.err != nil {
+		return false, f.err
+	}
+	return f.resumeResp, nil
+}
+
+func (f *fakeTaskQuery) CancelTask(_ context.Context, userID int64, taskID string) (bool, error) {
+	if f.cancelFn != nil {
+		return f.cancelFn(userID, taskID)
+	}
+	if f.err != nil {
+		return false, f.err
+	}
+	return f.cancelResp, nil
 }
 
 func (f *fakeTaskQuery) ClaimTaskForExecution(context.Context, service.ClaimTaskExecutionRequest) (service.Task, bool, error) {
@@ -182,9 +229,9 @@ func TestHandlerLastCommand(t *testing.T) {
 
 func TestHandlerQueueCommand(t *testing.T) {
 	h := Handler{
-		Tasks: &fakeTaskQuery{activeTasks: []service.Task{
+		Tasks: &fakeTaskQuery{queueTasks: []service.Task{
 			{TaskID: "task-a", Status: service.StatusRunning, URL: "https://t.me/c/1/2"},
-			{TaskID: "task-b", Status: service.StatusQueued, URL: "https://t.me/c/1/3"},
+			{TaskID: "task-b", Status: service.StatusDeadLettered, URL: "https://t.me/channel_name/3"},
 		}},
 	}
 
@@ -192,11 +239,18 @@ func TestHandlerQueueCommand(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !strings.Contains(outcome.Reply, "1. https://t.me/c/1/2 | task-a | running") {
+	if outcome.Reply != "请选择要操作的任务：" {
 		t.Fatalf("unexpected queue reply: %s", outcome.Reply)
 	}
 	if outcome.ReplyMarkup == nil || len(outcome.ReplyMarkup.InlineKeyboard) != 2 {
-		t.Fatalf("expected queue delete keyboard, got %+v", outcome.ReplyMarkup)
+		t.Fatalf("expected queue task keyboard, got %+v", outcome.ReplyMarkup)
+	}
+	firstButton := outcome.ReplyMarkup.InlineKeyboard[0][0]
+	if strings.Contains(firstButton.Text, "https://t.me/") {
+		t.Fatalf("expected compact queue button label, got %q", firstButton.Text)
+	}
+	if !strings.Contains(firstButton.Text, "⚡") || !strings.Contains(firstButton.Text, "c/1/2") {
+		t.Fatalf("unexpected first queue button label: %q", firstButton.Text)
 	}
 }
 
@@ -212,7 +266,7 @@ func TestHandlerDeleteCommandWithoutTaskIDShowsQueueSelection(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !strings.Contains(outcome.Reply, "1. https://t.me/c/1/2 | task-a | running") {
+	if outcome.Reply != "请选择要操作的任务：" {
 		t.Fatalf("unexpected delete selection reply: %s", outcome.Reply)
 	}
 	if outcome.ReplyMarkup == nil || len(outcome.ReplyMarkup.InlineKeyboard) != 2 {
@@ -229,7 +283,7 @@ func TestHandlerDeleteCommandWithoutTaskIDShowsEmptyQueue(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if outcome.Reply != "当前无执行中或排队中的任务。" {
+	if outcome.Reply != "当前无可操作任务。" {
 		t.Fatalf("unexpected empty delete reply: %s", outcome.Reply)
 	}
 	if outcome.ReplyMarkup != nil {
@@ -661,6 +715,7 @@ func TestHandlerRetryCommandRejectsNonFailedStatus(t *testing.T) {
 func TestHandleCallbackDeleteFlow(t *testing.T) {
 	const taskID = "task-123456"
 	tasks := &fakeTaskQuery{
+		queueTasks: []service.Task{{TaskID: "other-task", UserID: 1, Status: service.StatusQueued, URL: "https://t.me/c/1/3"}},
 		task: service.Task{
 			TaskID: taskID,
 			UserID: 1,
@@ -686,8 +741,112 @@ func TestHandleCallbackDeleteFlow(t *testing.T) {
 	if !strings.Contains(confirmed.Reply, "任务已删除") {
 		t.Fatalf("unexpected confirm reply: %s", confirmed.Reply)
 	}
+	if confirmed.ReplyMarkup == nil {
+		t.Fatalf("expected refreshed queue keyboard after delete, got %+v", confirmed.ReplyMarkup)
+	}
 	if confirmed.AnswerText != "删除成功" {
 		t.Fatalf("unexpected confirm answer: %s", confirmed.AnswerText)
+	}
+}
+
+func TestHandleCallbackQueueTaskMenuShowsStatusSpecificActions(t *testing.T) {
+	const taskID = "task-123456"
+	h := Handler{Tasks: &fakeTaskQuery{
+		task: service.Task{
+			TaskID: taskID,
+			UserID: 1,
+			URL:    "https://t.me/c/1/2",
+			Status: service.StatusPaused,
+		},
+	}}
+
+	outcome, err := h.HandleCallback(context.Background(), 1, "cb-1", callbackQueueTaskPrefix+taskID)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(outcome.Reply, "已暂停") {
+		t.Fatalf("unexpected queue task detail reply: %s", outcome.Reply)
+	}
+	if outcome.ReplyMarkup == nil || len(outcome.ReplyMarkup.InlineKeyboard) < 2 {
+		t.Fatalf("expected action keyboard, got %+v", outcome.ReplyMarkup)
+	}
+	row := outcome.ReplyMarkup.InlineKeyboard[0]
+	if row[0].Text != "继续" || row[1].Text != "取消" {
+		t.Fatalf("unexpected paused action row: %+v", row)
+	}
+}
+
+func TestHandleCallbackQueuePauseFlow(t *testing.T) {
+	const taskID = "task-123456"
+	tasks := &fakeTaskQuery{
+		task: service.Task{
+			TaskID: taskID,
+			UserID: 1,
+			URL:    "https://t.me/c/1/2",
+			Status: service.StatusPaused,
+		},
+		pauseResp: true,
+	}
+	tasks.pauseFn = func(userID int64, gotTaskID string) (bool, error) {
+		if userID != 1 || gotTaskID != taskID {
+			t.Fatalf("unexpected pause request: %d %s", userID, gotTaskID)
+		}
+		return true, nil
+	}
+
+	h := Handler{Tasks: tasks}
+	outcome, err := h.HandleCallback(context.Background(), 1, "cb-1", callbackQueuePausePrefix+taskID)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if outcome.AnswerText != "已暂停" {
+		t.Fatalf("unexpected pause answer text: %s", outcome.AnswerText)
+	}
+	if !strings.Contains(outcome.Reply, "已暂停") {
+		t.Fatalf("unexpected pause reply: %s", outcome.Reply)
+	}
+}
+
+func TestHandleCallbackQueueCancelRefreshesList(t *testing.T) {
+	const taskID = "task-123456"
+	tasks := &fakeTaskQuery{
+		queueTasks: []service.Task{{TaskID: "task-b", UserID: 1, Status: service.StatusQueued, URL: "https://t.me/c/1/3"}},
+		cancelResp: true,
+	}
+
+	h := Handler{Tasks: tasks}
+	outcome, err := h.HandleCallback(context.Background(), 1, "cb-1", callbackQueueCancelPrefix+taskID)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(outcome.Reply, "任务已取消") {
+		t.Fatalf("unexpected cancel reply: %s", outcome.Reply)
+	}
+	if outcome.ReplyMarkup == nil || len(outcome.ReplyMarkup.InlineKeyboard) == 0 {
+		t.Fatalf("expected refreshed queue keyboard, got %+v", outcome.ReplyMarkup)
+	}
+}
+
+func TestHandleCallbackQueueRunningTaskShowsNoMutationActions(t *testing.T) {
+	const taskID = "task-123456"
+	h := Handler{Tasks: &fakeTaskQuery{
+		task: service.Task{
+			TaskID: taskID,
+			UserID: 1,
+			URL:    "https://t.me/c/1/2",
+			Status: service.StatusRunning,
+		},
+	}}
+
+	outcome, err := h.HandleCallback(context.Background(), 1, "cb-1", callbackQueueTaskPrefix+taskID)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(outcome.Reply, "暂不支持操作") {
+		t.Fatalf("unexpected running task reply: %s", outcome.Reply)
+	}
+	if outcome.ReplyMarkup == nil || len(outcome.ReplyMarkup.InlineKeyboard) != 1 || outcome.ReplyMarkup.InlineKeyboard[0][0].Text != "返回队列" {
+		t.Fatalf("unexpected running task keyboard: %+v", outcome.ReplyMarkup)
 	}
 }
 

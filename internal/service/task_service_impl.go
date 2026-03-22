@@ -16,10 +16,14 @@ type TaskRepository interface {
 	FindByID(ctx context.Context, taskID string) (Task, error)
 	FindByIdempotencyKey(ctx context.Context, idempotencyKey string) (Task, error)
 	ListActiveByUser(ctx context.Context, userID int64, limit int) ([]Task, error)
+	ListQueueByUser(ctx context.Context, userID int64, limit int) ([]Task, error)
 	ListFailedForRetry(ctx context.Context, maxRetryCount int, limit int) ([]Task, error)
 	DeleteFailedByIdempotencyKey(ctx context.Context, idempotencyKey string) (int64, error)
 	DeletePendingByUserTaskID(ctx context.Context, userID int64, taskID string) (int64, error)
 	DeleteNonRunningByUserTaskID(ctx context.Context, userID int64, taskID string) (int64, error)
+	PauseByUserTaskID(ctx context.Context, userID int64, taskID string, updatedAt time.Time) (int64, error)
+	ResumeByUserTaskID(ctx context.Context, userID int64, taskID string, updatedAt time.Time) (int64, error)
+	CancelByUserTaskID(ctx context.Context, userID int64, taskID string, updatedAt time.Time) (int64, error)
 	ListRecentByUser(ctx context.Context, userID int64, limit int) ([]Task, error)
 	ClaimForExecution(ctx context.Context, taskID, leaseID string, startedAt time.Time) (Task, bool, error)
 }
@@ -112,6 +116,17 @@ func (s taskService) ListActiveTasks(ctx context.Context, userID int64, limit in
 	return tasks, nil
 }
 
+func (s taskService) ListQueueTasks(ctx context.Context, userID int64, limit int) ([]Task, error) {
+	if s.repo == nil {
+		return nil, errors.New("service: task repository is required")
+	}
+	tasks, err := s.repo.ListQueueByUser(ctx, userID, limit)
+	if err != nil {
+		return nil, fmt.Errorf("service: list queue tasks: %w", err)
+	}
+	return tasks, nil
+}
+
 func (s taskService) ListFailedTasksForRetry(ctx context.Context, maxRetryCount int, limit int) ([]Task, error) {
 	if s.repo == nil {
 		return nil, errors.New("service: task repository is required")
@@ -185,6 +200,57 @@ func (s taskService) DeleteTaskNonRunning(ctx context.Context, userID int64, tas
 	rows, err := s.repo.DeleteNonRunningByUserTaskID(ctx, userID, strings.TrimSpace(taskID))
 	if err != nil {
 		return false, fmt.Errorf("service: delete non-running task: %w", err)
+	}
+	return rows > 0, nil
+}
+
+func (s taskService) PauseTask(ctx context.Context, userID int64, taskID string) (bool, error) {
+	if s.repo == nil {
+		return false, errors.New("service: task repository is required")
+	}
+	if userID == 0 {
+		return false, errors.New("service: user id is required")
+	}
+	if strings.TrimSpace(taskID) == "" {
+		return false, errors.New("service: task id is required")
+	}
+	rows, err := s.repo.PauseByUserTaskID(ctx, userID, strings.TrimSpace(taskID), time.Now().UTC())
+	if err != nil {
+		return false, fmt.Errorf("service: pause task: %w", err)
+	}
+	return rows > 0, nil
+}
+
+func (s taskService) ResumeTask(ctx context.Context, userID int64, taskID string) (bool, error) {
+	if s.repo == nil {
+		return false, errors.New("service: task repository is required")
+	}
+	if userID == 0 {
+		return false, errors.New("service: user id is required")
+	}
+	if strings.TrimSpace(taskID) == "" {
+		return false, errors.New("service: task id is required")
+	}
+	rows, err := s.repo.ResumeByUserTaskID(ctx, userID, strings.TrimSpace(taskID), time.Now().UTC())
+	if err != nil {
+		return false, fmt.Errorf("service: resume task: %w", err)
+	}
+	return rows > 0, nil
+}
+
+func (s taskService) CancelTask(ctx context.Context, userID int64, taskID string) (bool, error) {
+	if s.repo == nil {
+		return false, errors.New("service: task repository is required")
+	}
+	if userID == 0 {
+		return false, errors.New("service: user id is required")
+	}
+	if strings.TrimSpace(taskID) == "" {
+		return false, errors.New("service: task id is required")
+	}
+	rows, err := s.repo.CancelByUserTaskID(ctx, userID, strings.TrimSpace(taskID), time.Now().UTC())
+	if err != nil {
+		return false, fmt.Errorf("service: cancel task: %w", err)
 	}
 	return rows > 0, nil
 }

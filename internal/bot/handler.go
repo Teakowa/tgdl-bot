@@ -18,12 +18,20 @@ import (
 )
 
 const (
-	activeTaskListLimit     = 20
-	callbackDeletePrefix    = "qdel:"
-	callbackDeleteOKPrefix  = "qdelok:"
-	callbackDeleteNoPrefix  = "qdelno:"
-	callbackDeleteMinTaskID = 8
+	activeTaskListLimit       = 20
+	callbackQueueTaskPrefix   = "qtask:"
+	callbackQueueBackPrefix   = "qback:"
+	callbackQueuePausePrefix  = "qpause:"
+	callbackQueueResumePrefix = "qresume:"
+	callbackQueueCancelPrefix = "qcancel:"
+	callbackQueueRetryPrefix  = "qretry:"
+	callbackDeletePrefix      = "qdel:"
+	callbackDeleteOKPrefix    = "qdelok:"
+	callbackDeleteNoPrefix    = "qdelno:"
+	callbackDeleteMinTaskID   = 8
 )
+
+var errTaskForbidden = errors.New("bot: forbidden task")
 
 func BuildCommandReply(cmd ParsedCommand) string {
 	switch cmd.Name {
@@ -51,7 +59,7 @@ func BuildCommandReply(cmd ParsedCommand) string {
 	case CommandForward:
 		return "用法: /forward <source_url> <target> [--drop-caption]"
 	case CommandQueue:
-		return "活跃任务查询已接收（running/queued/retrying）。"
+		return "任务队列查询已接收（通过按钮查看并操作）。"
 	case CommandDelete:
 		return "用法: /delete [task_id] [-f|--force]"
 	case CommandRetry:
@@ -139,15 +147,7 @@ func (h Handler) HandleTextWithOutcome(ctx context.Context, userID, chatID int64
 		if h.Tasks == nil {
 			return HandleTextOutcome{Reply: "任务队列查询暂未启用。"}, nil
 		}
-		tasks, err := h.Tasks.ListActiveTasks(ctx, userID, activeTaskListLimit)
-		if err != nil {
-			return HandleTextOutcome{}, err
-		}
-		reply := formatQueue(tasks)
-		if len(tasks) == 0 {
-			return HandleTextOutcome{Reply: reply}, nil
-		}
-		return HandleTextOutcome{Reply: reply, ReplyMarkup: buildQueueDeleteKeyboard(tasks)}, nil
+		return h.buildQueueListOutcome(ctx, userID)
 	case CommandDelete:
 		if cmd.TaskID == "" {
 			if h.Tasks == nil {
@@ -161,7 +161,7 @@ func (h Handler) HandleTextWithOutcome(ctx context.Context, userID, chatID int64
 			if len(tasks) == 0 {
 				return HandleTextOutcome{Reply: reply}, nil
 			}
-			return HandleTextOutcome{Reply: reply, ReplyMarkup: buildQueueDeleteKeyboard(tasks)}, nil
+			return HandleTextOutcome{Reply: reply, ReplyMarkup: buildQueueTaskKeyboard(tasks)}, nil
 		}
 		return h.handleDeleteByTaskID(ctx, userID, cmd.TaskID, cmd.Force)
 	case CommandRetry:
@@ -187,6 +187,71 @@ func (h Handler) HandleCallback(ctx context.Context, userID int64, callbackID, d
 	}
 
 	switch {
+	case strings.HasPrefix(data, callbackQueueTaskPrefix):
+		taskID := parseCallbackTaskID(data, callbackQueueTaskPrefix)
+		if taskID == "" {
+			return HandleCallbackOutcome{Reply: "无效任务 ID。", AnswerText: "参数错误"}, nil
+		}
+		return h.buildQueueTaskMenuOutcome(ctx, userID, taskID, "已选择任务")
+	case strings.HasPrefix(data, callbackQueueBackPrefix):
+		outcome, err := h.buildQueueListOutcome(ctx, userID)
+		if err != nil {
+			return HandleCallbackOutcome{}, err
+		}
+		return HandleCallbackOutcome{
+			Reply:       outcome.Reply,
+			ReplyMarkup: outcome.ReplyMarkup,
+			AnswerText:  "已返回队列",
+		}, nil
+	case strings.HasPrefix(data, callbackQueuePausePrefix):
+		taskID := parseCallbackTaskID(data, callbackQueuePausePrefix)
+		if taskID == "" {
+			return HandleCallbackOutcome{Reply: "无效任务 ID。", AnswerText: "参数错误"}, nil
+		}
+		ok, err := h.Tasks.PauseTask(ctx, userID, taskID)
+		if err != nil {
+			return HandleCallbackOutcome{}, err
+		}
+		if !ok {
+			return HandleCallbackOutcome{Reply: "任务状态已变化，请刷新 /queue。", AnswerText: "状态已变化"}, nil
+		}
+		return h.buildQueueTaskMenuOutcome(ctx, userID, taskID, "已暂停")
+	case strings.HasPrefix(data, callbackQueueResumePrefix):
+		taskID := parseCallbackTaskID(data, callbackQueueResumePrefix)
+		if taskID == "" {
+			return HandleCallbackOutcome{Reply: "无效任务 ID。", AnswerText: "参数错误"}, nil
+		}
+		ok, err := h.Tasks.ResumeTask(ctx, userID, taskID)
+		if err != nil {
+			return HandleCallbackOutcome{}, err
+		}
+		if !ok {
+			return HandleCallbackOutcome{Reply: "任务状态已变化，请刷新 /queue。", AnswerText: "状态已变化"}, nil
+		}
+		return h.buildQueueTaskMenuOutcome(ctx, userID, taskID, "已继续")
+	case strings.HasPrefix(data, callbackQueueCancelPrefix):
+		taskID := parseCallbackTaskID(data, callbackQueueCancelPrefix)
+		if taskID == "" {
+			return HandleCallbackOutcome{Reply: "无效任务 ID。", AnswerText: "参数错误"}, nil
+		}
+		ok, err := h.Tasks.CancelTask(ctx, userID, taskID)
+		if err != nil {
+			return HandleCallbackOutcome{}, err
+		}
+		if !ok {
+			return HandleCallbackOutcome{Reply: "任务状态已变化，请刷新 /queue。", AnswerText: "状态已变化"}, nil
+		}
+		return h.buildQueueRefreshCallback(ctx, userID, fmt.Sprintf("任务已取消\nTask ID: %s", taskID), "已取消")
+	case strings.HasPrefix(data, callbackQueueRetryPrefix):
+		taskID := parseCallbackTaskID(data, callbackQueueRetryPrefix)
+		if taskID == "" {
+			return HandleCallbackOutcome{Reply: "无效任务 ID。", AnswerText: "参数错误"}, nil
+		}
+		outcome, err := h.retryTaskByTaskID(ctx, userID, taskID)
+		if err != nil {
+			return HandleCallbackOutcome{}, err
+		}
+		return h.buildQueueRefreshCallback(ctx, userID, outcome.Reply, "已重试")
 	case strings.HasPrefix(data, callbackDeletePrefix):
 		taskID := parseCallbackTaskID(data, callbackDeletePrefix)
 		if taskID == "" {
@@ -205,14 +270,14 @@ func (h Handler) HandleCallback(ctx context.Context, userID int64, callbackID, d
 		switch task.Status {
 		case service.StatusRunning:
 			return HandleCallbackOutcome{Reply: "任务正在执行中，无法删除。", AnswerText: "无法删除"}, nil
-		case service.StatusQueued, service.StatusRetrying:
+		case service.StatusQueued, service.StatusRetrying, service.StatusPaused, service.StatusFailed, service.StatusDeadLettered:
 			return HandleCallbackOutcome{
-				Reply:       fmt.Sprintf("确认删除任务？\nTask ID: %s\nURL: %s", task.TaskID, task.URL),
+				Reply:       fmt.Sprintf("确认删除任务？\nTask ID: %s\n来源: %s", task.TaskID, formatQueueTaskSource(task)),
 				ReplyMarkup: buildDeleteConfirmKeyboard(task.TaskID),
 				AnswerText:  "请确认删除",
 			}, nil
 		default:
-			return HandleCallbackOutcome{Reply: "仅可删除 queued/retrying 任务。", AnswerText: "状态不支持"}, nil
+			return HandleCallbackOutcome{Reply: "当前状态不支持删除。", AnswerText: "状态不支持"}, nil
 		}
 	case strings.HasPrefix(data, callbackDeleteOKPrefix):
 		taskID := parseCallbackTaskID(data, callbackDeleteOKPrefix)
@@ -227,12 +292,80 @@ func (h Handler) HandleCallback(ctx context.Context, userID int64, callbackID, d
 		if strings.Contains(outcome.Reply, "任务已删除") {
 			answer = "删除成功"
 		}
-		return HandleCallbackOutcome{Reply: outcome.Reply, AnswerText: answer}, nil
+		return h.buildQueueRefreshCallback(ctx, userID, outcome.Reply, answer)
 	case strings.HasPrefix(data, callbackDeleteNoPrefix):
-		return HandleCallbackOutcome{Reply: "已取消删除。", AnswerText: "已取消"}, nil
+		taskID := parseCallbackTaskID(data, callbackDeleteNoPrefix)
+		if taskID == "" {
+			return HandleCallbackOutcome{Reply: "已取消删除。", AnswerText: "已取消"}, nil
+		}
+		return h.buildQueueTaskMenuOutcome(ctx, userID, taskID, "已取消")
 	default:
 		return HandleCallbackOutcome{AnswerText: "不支持的操作"}, nil
 	}
+}
+
+func (h Handler) buildQueueListOutcome(ctx context.Context, userID int64) (HandleTextOutcome, error) {
+	tasks, err := h.Tasks.ListQueueTasks(ctx, userID, activeTaskListLimit)
+	if err != nil {
+		return HandleTextOutcome{}, err
+	}
+	reply := formatQueue(tasks)
+	if len(tasks) == 0 {
+		return HandleTextOutcome{Reply: reply}, nil
+	}
+	return HandleTextOutcome{
+		Reply:       reply,
+		ReplyMarkup: buildQueueTaskKeyboard(tasks),
+	}, nil
+}
+
+func (h Handler) buildQueueRefreshCallback(ctx context.Context, userID int64, prefixReply, answerText string) (HandleCallbackOutcome, error) {
+	outcome, err := h.buildQueueListOutcome(ctx, userID)
+	if err != nil {
+		return HandleCallbackOutcome{}, err
+	}
+	reply := strings.TrimSpace(prefixReply)
+	if strings.TrimSpace(outcome.Reply) != "" {
+		if reply != "" {
+			reply += "\n\n"
+		}
+		reply += outcome.Reply
+	}
+	return HandleCallbackOutcome{
+		Reply:       reply,
+		ReplyMarkup: outcome.ReplyMarkup,
+		AnswerText:  answerText,
+	}, nil
+}
+
+func (h Handler) buildQueueTaskMenuOutcome(ctx context.Context, userID int64, taskID, answerText string) (HandleCallbackOutcome, error) {
+	task, err := h.loadOwnedTask(ctx, userID, taskID)
+	if err != nil {
+		if errors.Is(err, service.ErrTaskNotFound) {
+			return HandleCallbackOutcome{Reply: "任务不存在或已处理。", AnswerText: "任务不存在"}, nil
+		}
+		if errors.Is(err, errTaskForbidden) {
+			return HandleCallbackOutcome{Reply: "无权限操作该任务。", AnswerText: "无权限"}, nil
+		}
+		return HandleCallbackOutcome{}, err
+	}
+
+	return HandleCallbackOutcome{
+		Reply:       formatQueueTaskDetail(task),
+		ReplyMarkup: buildQueueTaskActionKeyboard(task),
+		AnswerText:  answerText,
+	}, nil
+}
+
+func (h Handler) loadOwnedTask(ctx context.Context, userID int64, taskID string) (service.Task, error) {
+	task, err := h.Tasks.GetTask(ctx, taskID)
+	if err != nil {
+		return service.Task{}, err
+	}
+	if task.UserID != userID {
+		return service.Task{}, errTaskForbidden
+	}
+	return task, nil
 }
 
 func (h Handler) createTaskFromRequest(ctx context.Context, userID, chatID int64, url, targetPeer string, dropCaption bool) (HandleTextOutcome, error) {
@@ -343,16 +476,23 @@ func (h Handler) handleDeleteByTaskID(ctx context.Context, userID int64, taskID 
 
 	switch task.Status {
 	case service.StatusQueued, service.StatusRetrying:
+		deleted, err := h.Tasks.DeletePendingTask(ctx, userID, taskID)
+		if err != nil {
+			return HandleTextOutcome{}, err
+		}
+		if !deleted {
+			return HandleTextOutcome{Reply: "任务状态已变化，请刷新 /queue。"}, nil
+		}
+	case service.StatusPaused, service.StatusFailed, service.StatusDeadLettered:
+		deleted, err := h.Tasks.DeleteTaskNonRunning(ctx, userID, taskID)
+		if err != nil {
+			return HandleTextOutcome{}, err
+		}
+		if !deleted {
+			return HandleTextOutcome{Reply: "任务状态已变化，请刷新 /queue。"}, nil
+		}
 	default:
-		return HandleTextOutcome{Reply: "仅可删除 queued/retrying 任务。"}, nil
-	}
-
-	deleted, err := h.Tasks.DeletePendingTask(ctx, userID, taskID)
-	if err != nil {
-		return HandleTextOutcome{}, err
-	}
-	if !deleted {
-		return HandleTextOutcome{Reply: "任务状态已变化，请刷新 /queue。"}, nil
+		return HandleTextOutcome{Reply: "当前状态不支持删除。"}, nil
 	}
 
 	return HandleTextOutcome{Reply: fmt.Sprintf("任务已删除\nTask ID: %s", taskID)}, nil
@@ -559,26 +699,20 @@ func formatLast(tasks []service.Task) string {
 
 func formatQueue(tasks []service.Task) string {
 	if len(tasks) == 0 {
-		return "当前无执行中或排队中的任务。"
+		return "当前无可操作任务。"
 	}
-
-	lines := make([]string, 0, len(tasks)+1)
-	lines = append(lines, "当前任务队列:")
-	for i, task := range tasks {
-		lines = append(lines, fmt.Sprintf("%d. %s | %s | %s", i+1, task.URL, task.TaskID, task.Status))
-	}
-	return strings.Join(lines, "\n")
+	return "请选择要操作的任务："
 }
 
-func buildQueueDeleteKeyboard(tasks []service.Task) *telegram.InlineKeyboardMarkup {
+func buildQueueTaskKeyboard(tasks []service.Task) *telegram.InlineKeyboardMarkup {
 	if len(tasks) == 0 {
 		return nil
 	}
 	rows := make([][]telegram.InlineKeyboardButton, 0, len(tasks))
-	for i, task := range tasks {
+	for _, task := range tasks {
 		rows = append(rows, []telegram.InlineKeyboardButton{{
-			Text:         fmt.Sprintf("删除 %d (%s)", i+1, shortTaskID(task.TaskID)),
-			CallbackData: callbackDeletePrefix + task.TaskID,
+			Text:         formatQueueTaskButton(task),
+			CallbackData: callbackQueueTaskPrefix + task.TaskID,
 		}})
 	}
 	return &telegram.InlineKeyboardMarkup{InlineKeyboard: rows}
@@ -589,9 +723,100 @@ func buildDeleteConfirmKeyboard(taskID string) *telegram.InlineKeyboardMarkup {
 		InlineKeyboard: [][]telegram.InlineKeyboardButton{
 			{
 				{Text: "确认删除", CallbackData: callbackDeleteOKPrefix + taskID},
-				{Text: "取消", CallbackData: callbackDeleteNoPrefix + taskID},
+				{Text: "返回任务", CallbackData: callbackDeleteNoPrefix + taskID},
 			},
 		},
+	}
+}
+
+func buildQueueTaskActionKeyboard(task service.Task) *telegram.InlineKeyboardMarkup {
+	rows := make([][]telegram.InlineKeyboardButton, 0, 3)
+	switch task.Status {
+	case service.StatusQueued, service.StatusRetrying:
+		rows = append(rows, []telegram.InlineKeyboardButton{
+			{Text: "暂停", CallbackData: callbackQueuePausePrefix + task.TaskID},
+			{Text: "取消", CallbackData: callbackQueueCancelPrefix + task.TaskID},
+		})
+		rows = append(rows, []telegram.InlineKeyboardButton{
+			{Text: "删除", CallbackData: callbackDeletePrefix + task.TaskID},
+		})
+	case service.StatusPaused:
+		rows = append(rows, []telegram.InlineKeyboardButton{
+			{Text: "继续", CallbackData: callbackQueueResumePrefix + task.TaskID},
+			{Text: "取消", CallbackData: callbackQueueCancelPrefix + task.TaskID},
+		})
+		rows = append(rows, []telegram.InlineKeyboardButton{
+			{Text: "删除", CallbackData: callbackDeletePrefix + task.TaskID},
+		})
+	case service.StatusFailed, service.StatusDeadLettered:
+		rows = append(rows, []telegram.InlineKeyboardButton{
+			{Text: "重试", CallbackData: callbackQueueRetryPrefix + task.TaskID},
+			{Text: "删除", CallbackData: callbackDeletePrefix + task.TaskID},
+		})
+	}
+	rows = append(rows, []telegram.InlineKeyboardButton{
+		{Text: "返回队列", CallbackData: callbackQueueBackPrefix + task.TaskID},
+	})
+	return &telegram.InlineKeyboardMarkup{InlineKeyboard: rows}
+}
+
+func formatQueueTaskButton(task service.Task) string {
+	icon := tasknotify.StatusMessageEmoji(task.Status)
+	if icon == "" {
+		icon = "ℹ️"
+	}
+	return fmt.Sprintf("%s %s · %s", icon, formatQueueTaskSource(task), shortTaskID(task.TaskID))
+}
+
+func formatQueueTaskSource(task service.Task) string {
+	u, err := neturl.Parse(strings.TrimSpace(task.URL))
+	if err != nil {
+		return strings.TrimSpace(task.URL)
+	}
+	path := strings.Trim(strings.TrimSpace(u.Path), "/")
+	if path == "" {
+		return shortTaskID(task.TaskID)
+	}
+	return path
+}
+
+func formatQueueTaskDetail(task service.Task) string {
+	lines := []string{
+		fmt.Sprintf("%s %s", tasknotify.StatusMessageEmoji(task.Status), queueStatusLabel(task.Status)),
+		fmt.Sprintf("Task ID: %s", task.TaskID),
+		fmt.Sprintf("来源: %s", formatQueueTaskSource(task)),
+		fmt.Sprintf("URL: %s", task.URL),
+	}
+	if strings.TrimSpace(task.TargetPeer) != "" {
+		lines = append(lines, fmt.Sprintf("目标: %s", task.TargetPeer))
+	}
+	if task.ErrorMessage != nil && strings.TrimSpace(*task.ErrorMessage) != "" {
+		lines = append(lines, fmt.Sprintf("最近错误: %s", *task.ErrorMessage))
+	}
+	if task.Status == service.StatusRunning {
+		lines = append(lines, "当前运行中，暂不支持操作。")
+	}
+	return strings.Join(lines, "\n")
+}
+
+func queueStatusLabel(status service.Status) string {
+	switch status {
+	case service.StatusQueued:
+		return "排队中"
+	case service.StatusRunning:
+		return "进行中"
+	case service.StatusRetrying:
+		return "重试中"
+	case service.StatusPaused:
+		return "已暂停"
+	case service.StatusFailed:
+		return "失败"
+	case service.StatusDeadLettered:
+		return "失败（停止重试）"
+	case service.StatusCancelled:
+		return "已取消"
+	default:
+		return string(status)
 	}
 }
 

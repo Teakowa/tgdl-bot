@@ -18,10 +18,14 @@ type TaskRepository interface {
 	FindByID(ctx context.Context, taskID string) (service.Task, error)
 	FindByIdempotencyKey(ctx context.Context, idempotencyKey string) (service.Task, error)
 	ListActiveByUser(ctx context.Context, userID int64, limit int) ([]service.Task, error)
+	ListQueueByUser(ctx context.Context, userID int64, limit int) ([]service.Task, error)
 	ListFailedForRetry(ctx context.Context, maxRetryCount int, limit int) ([]service.Task, error)
 	DeleteFailedByIdempotencyKey(ctx context.Context, idempotencyKey string) (int64, error)
 	DeletePendingByUserTaskID(ctx context.Context, userID int64, taskID string) (int64, error)
 	DeleteNonRunningByUserTaskID(ctx context.Context, userID int64, taskID string) (int64, error)
+	PauseByUserTaskID(ctx context.Context, userID int64, taskID string, updatedAt time.Time) (int64, error)
+	ResumeByUserTaskID(ctx context.Context, userID int64, taskID string, updatedAt time.Time) (int64, error)
+	CancelByUserTaskID(ctx context.Context, userID int64, taskID string, updatedAt time.Time) (int64, error)
 	ListRecentByUser(ctx context.Context, userID int64, limit int) ([]service.Task, error)
 	ClaimForExecution(ctx context.Context, taskID, leaseID string, startedAt time.Time) (service.Task, bool, error)
 }
@@ -205,6 +209,63 @@ func (r *D1TaskRepository) ListActiveByUser(ctx context.Context, userID int64, l
 	return tasks, nil
 }
 
+func (r *D1TaskRepository) ListQueueByUser(ctx context.Context, userID int64, limit int) ([]service.Task, error) {
+	if r == nil || r.Client == nil {
+		return nil, errors.New("storage: nil d1 task repository")
+	}
+	if limit <= 0 {
+		limit = 20
+	}
+
+	result, err := r.Client.Query(ctx, `
+		SELECT task_id, chat_id, user_id, target_peer, url, drop_caption, status, idempotency_key,
+		       retry_count, source_message_id, status_message_id, lease_id, output_summary, error_message, exit_code,
+		       created_at, updated_at, started_at, finished_at
+		FROM tasks
+		WHERE user_id = ?
+		  AND status IN (?, ?, ?, ?, ?, ?)
+		ORDER BY
+		  CASE status
+		    WHEN ? THEN 0
+		    WHEN ? THEN 1
+		    WHEN ? THEN 2
+		    WHEN ? THEN 3
+		    WHEN ? THEN 4
+		    WHEN ? THEN 5
+		    ELSE 6
+		  END ASC,
+		  created_at ASC
+		LIMIT ?`,
+		userID,
+		string(service.StatusRunning),
+		string(service.StatusQueued),
+		string(service.StatusRetrying),
+		string(service.StatusPaused),
+		string(service.StatusFailed),
+		string(service.StatusDeadLettered),
+		string(service.StatusRunning),
+		string(service.StatusRetrying),
+		string(service.StatusQueued),
+		string(service.StatusPaused),
+		string(service.StatusFailed),
+		string(service.StatusDeadLettered),
+		limit,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("storage: list queue tasks for user %d: %w", userID, err)
+	}
+
+	tasks := make([]service.Task, 0, len(result.Results))
+	for _, row := range result.Results {
+		task, err := taskFromResultRow(row)
+		if err != nil {
+			return nil, fmt.Errorf("storage: decode queue task row: %w", err)
+		}
+		tasks = append(tasks, task)
+	}
+	return tasks, nil
+}
+
 func (r *D1TaskRepository) ListFailedForRetry(ctx context.Context, maxRetryCount int, limit int) ([]service.Task, error) {
 	if r == nil || r.Client == nil {
 		return nil, errors.New("storage: nil d1 task repository")
@@ -301,6 +362,79 @@ func (r *D1TaskRepository) DeleteNonRunningByUserTaskID(ctx context.Context, use
 	)
 	if err != nil {
 		return 0, fmt.Errorf("storage: delete non-running task %q for user %d: %w", taskID, userID, err)
+	}
+	return result.Meta.Changes, nil
+}
+
+func (r *D1TaskRepository) PauseByUserTaskID(ctx context.Context, userID int64, taskID string, updatedAt time.Time) (int64, error) {
+	if r == nil || r.Client == nil {
+		return 0, errors.New("storage: nil d1 task repository")
+	}
+
+	result, err := r.Client.Query(ctx, `
+		UPDATE tasks
+		SET status = ?, updated_at = ?
+		WHERE task_id = ?
+		  AND user_id = ?
+		  AND status IN (?, ?)`,
+		string(service.StatusPaused),
+		nullableTime(updatedAt.UTC()),
+		taskID,
+		userID,
+		string(service.StatusQueued),
+		string(service.StatusRetrying),
+	)
+	if err != nil {
+		return 0, fmt.Errorf("storage: pause task %q for user %d: %w", taskID, userID, err)
+	}
+	return result.Meta.Changes, nil
+}
+
+func (r *D1TaskRepository) ResumeByUserTaskID(ctx context.Context, userID int64, taskID string, updatedAt time.Time) (int64, error) {
+	if r == nil || r.Client == nil {
+		return 0, errors.New("storage: nil d1 task repository")
+	}
+
+	result, err := r.Client.Query(ctx, `
+		UPDATE tasks
+		SET status = ?, updated_at = ?
+		WHERE task_id = ?
+		  AND user_id = ?
+		  AND status = ?`,
+		string(service.StatusQueued),
+		nullableTime(updatedAt.UTC()),
+		taskID,
+		userID,
+		string(service.StatusPaused),
+	)
+	if err != nil {
+		return 0, fmt.Errorf("storage: resume task %q for user %d: %w", taskID, userID, err)
+	}
+	return result.Meta.Changes, nil
+}
+
+func (r *D1TaskRepository) CancelByUserTaskID(ctx context.Context, userID int64, taskID string, updatedAt time.Time) (int64, error) {
+	if r == nil || r.Client == nil {
+		return 0, errors.New("storage: nil d1 task repository")
+	}
+
+	result, err := r.Client.Query(ctx, `
+		UPDATE tasks
+		SET status = ?, updated_at = ?, finished_at = ?
+		WHERE task_id = ?
+		  AND user_id = ?
+		  AND status IN (?, ?, ?)`,
+		string(service.StatusCancelled),
+		nullableTime(updatedAt.UTC()),
+		nullableTime(updatedAt.UTC()),
+		taskID,
+		userID,
+		string(service.StatusQueued),
+		string(service.StatusRetrying),
+		string(service.StatusPaused),
+	)
+	if err != nil {
+		return 0, fmt.Errorf("storage: cancel task %q for user %d: %w", taskID, userID, err)
 	}
 	return result.Meta.Changes, nil
 }

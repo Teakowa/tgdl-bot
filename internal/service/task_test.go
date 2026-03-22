@@ -33,6 +33,8 @@ func TestStatusValid(t *testing.T) {
 	cases := map[Status]bool{
 		StatusQueued:       true,
 		StatusRunning:      true,
+		StatusPaused:       true,
+		StatusCancelled:    true,
 		StatusDone:         true,
 		StatusFailed:       true,
 		StatusRetrying:     true,

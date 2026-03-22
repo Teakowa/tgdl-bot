@@ -64,6 +64,10 @@ func SourceReactionEmoji(status service.Status) string {
 		return "👀"
 	case service.StatusRunning:
 		return "⚡"
+	case service.StatusPaused:
+		return "⏸️"
+	case service.StatusCancelled:
+		return "🛑"
 	case service.StatusRetrying:
 		return "🤔"
 	case service.StatusDone:
@@ -81,6 +85,10 @@ func StatusMessageEmoji(status service.Status) string {
 		return "⏳"
 	case service.StatusRunning:
 		return "⚡"
+	case service.StatusPaused:
+		return "⏸️"
+	case service.StatusCancelled:
+		return "🛑"
 	case service.StatusRetrying:
 		return "🔄"
 	case service.StatusDone:
@@ -125,6 +133,10 @@ func statusLabel(status service.Status) string {
 		return "任务进行中"
 	case service.StatusRetrying:
 		return "任务重试中"
+	case service.StatusPaused:
+		return "任务已暂停"
+	case service.StatusCancelled:
+		return "任务已取消"
 	case service.StatusDone:
 		return "任务已完成"
 	case service.StatusFailed:

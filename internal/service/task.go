@@ -14,6 +14,8 @@ type Status string
 const (
 	StatusQueued       Status = "queued"
 	StatusRunning      Status = "running"
+	StatusPaused       Status = "paused"
+	StatusCancelled    Status = "cancelled"
 	StatusDone         Status = "done"
 	StatusFailed       Status = "failed"
 	StatusRetrying     Status = "retrying"
@@ -23,6 +25,8 @@ const (
 var validStatuses = map[Status]struct{}{
 	StatusQueued:       {},
 	StatusRunning:      {},
+	StatusPaused:       {},
+	StatusCancelled:    {},
 	StatusDone:         {},
 	StatusFailed:       {},
 	StatusRetrying:     {},
@@ -94,11 +98,15 @@ type TaskService interface {
 	GetTask(ctx context.Context, taskID string) (Task, error)
 	ListRecentTasks(ctx context.Context, userID int64, limit int) ([]Task, error)
 	ListActiveTasks(ctx context.Context, userID int64, limit int) ([]Task, error)
+	ListQueueTasks(ctx context.Context, userID int64, limit int) ([]Task, error)
 	ListFailedTasksForRetry(ctx context.Context, maxRetryCount int, limit int) ([]Task, error)
 	FindByIdempotencyKey(ctx context.Context, idempotencyKey string) (Task, error)
 	DeleteFailedByIdempotencyKey(ctx context.Context, idempotencyKey string) (int64, error)
 	DeletePendingTask(ctx context.Context, userID int64, taskID string) (bool, error)
 	DeleteTaskNonRunning(ctx context.Context, userID int64, taskID string) (bool, error)
+	PauseTask(ctx context.Context, userID int64, taskID string) (bool, error)
+	ResumeTask(ctx context.Context, userID int64, taskID string) (bool, error)
+	CancelTask(ctx context.Context, userID int64, taskID string) (bool, error)
 	ClaimTaskForExecution(ctx context.Context, req ClaimTaskExecutionRequest) (Task, bool, error)
 	UpdateTask(ctx context.Context, taskID string, update TaskUpdate) error
 }
