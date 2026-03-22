@@ -39,7 +39,7 @@ func (n Notifier) Notify(ctx context.Context, task service.Task) error {
 	}
 
 	if task.SourceMessageID != nil {
-		emoji := ReactionEmoji(task.Status)
+		emoji := SourceReactionEmoji(task.Status)
 		if emoji != "" {
 			if err := n.Client.SetMessageReaction(ctx, telegram.SetMessageReactionRequest{
 				ChatID:    task.ChatID,
@@ -58,7 +58,24 @@ func (n Notifier) Notify(ctx context.Context, task service.Task) error {
 	return errors.Join(errs...)
 }
 
-func ReactionEmoji(status service.Status) string {
+func SourceReactionEmoji(status service.Status) string {
+	switch status {
+	case service.StatusQueued:
+		return "👀"
+	case service.StatusRunning:
+		return "⚡"
+	case service.StatusRetrying:
+		return "🤔"
+	case service.StatusDone:
+		return "👍"
+	case service.StatusFailed, service.StatusDeadLettered:
+		return "👎"
+	default:
+		return ""
+	}
+}
+
+func StatusMessageEmoji(status service.Status) string {
 	switch status {
 	case service.StatusQueued:
 		return "⏳"
@@ -76,7 +93,7 @@ func ReactionEmoji(status service.Status) string {
 }
 
 func FormatTaskStatusMessage(task service.Task) string {
-	icon := ReactionEmoji(task.Status)
+	icon := StatusMessageEmoji(task.Status)
 	if icon == "" {
 		icon = "ℹ️"
 	}

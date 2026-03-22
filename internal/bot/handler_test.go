@@ -521,7 +521,7 @@ func TestHandleTextWithOutcomeReturnsReactionEmoji(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if outcome.ReactionEmoji != "🔄" {
+	if outcome.ReactionEmoji != "🤔" {
 		t.Fatalf("unexpected reaction emoji: %q", outcome.ReactionEmoji)
 	}
 }

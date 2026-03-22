@@ -54,7 +54,7 @@ func TestHandleUpdateBuildsReactionForTaskStatus(t *testing.T) {
 	if outcome == nil || outcome.ReactionRequest == nil {
 		t.Fatalf("expected reaction request, got %+v", outcome)
 	}
-	if len(outcome.ReactionRequest.Reaction) != 1 || outcome.ReactionRequest.Reaction[0].Emoji != "❌" {
+	if len(outcome.ReactionRequest.Reaction) != 1 || outcome.ReactionRequest.Reaction[0].Emoji != "👎" {
 		t.Fatalf("unexpected reaction payload: %+v", outcome.ReactionRequest.Reaction)
 	}
 }

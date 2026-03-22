@@ -473,7 +473,7 @@ func isRebuildableStatus(status service.Status) bool {
 }
 
 func statusReaction(status service.Status) string {
-	return tasknotify.ReactionEmoji(status)
+	return tasknotify.SourceReactionEmoji(status)
 }
 
 func formatStatus(task service.Task) string {

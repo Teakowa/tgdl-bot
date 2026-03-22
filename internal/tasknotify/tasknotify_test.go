@@ -104,8 +104,31 @@ func TestNotifierNotifySourceReactionUsesDoneEmoji(t *testing.T) {
 	if client.reactionReq == nil || client.reactionReq.MessageID != sourceID {
 		t.Fatalf("expected source reaction update, got %+v", client.reactionReq)
 	}
-	if got := client.reactionReq.Reaction[0].Emoji; got != "✅" {
+	if got := client.reactionReq.Reaction[0].Emoji; got != "👍" {
 		t.Fatalf("expected done emoji, got %q", got)
+	}
+}
+
+func TestNotifierNotifySourceReactionUsesFailedEmoji(t *testing.T) {
+	sourceID := int64(10)
+	client := &fakeClient{}
+	notifier := Notifier{Client: client}
+	task := service.Task{
+		TaskID:          "t1",
+		ChatID:          100,
+		URL:             "https://t.me/c/1/2",
+		Status:          service.StatusFailed,
+		SourceMessageID: &sourceID,
+	}
+
+	if err := notifier.Notify(context.Background(), task); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if client.reactionReq == nil || client.reactionReq.MessageID != sourceID {
+		t.Fatalf("expected source reaction update, got %+v", client.reactionReq)
+	}
+	if got := client.reactionReq.Reaction[0].Emoji; got != "👎" {
+		t.Fatalf("expected failed emoji, got %q", got)
 	}
 }
 
