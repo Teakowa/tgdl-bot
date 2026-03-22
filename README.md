@@ -111,6 +111,20 @@ docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.build.yml u
 
 For full commands (`build`/`pull`/`up`) and `tdl login` bootstrap, see [docs/DEPLOY.md](docs/DEPLOY.md).
 
+## Releases
+
+Releases are generated from Conventional Commits merged into `main`.
+GitHub Actions uses `release-please` to keep a release PR up to date and to create the final `vX.Y.Z` tag and GitHub Release when that release PR is merged.
+
+Version bumps follow the Conventional Commits contract:
+
+- `fix:` => patch release
+- `feat:` => minor release
+- `feat!:` or `BREAKING CHANGE:` => major release
+
+GitHub Releases contain generated release notes only.
+Container image publication remains tag-driven: when the release workflow creates a `vX.Y.Z` tag, the existing `docker-publish` workflow publishes the matching GHCR images automatically.
+
 ## Deployment notes
 
 - Bot and downloader can run on the same machine or separately.
