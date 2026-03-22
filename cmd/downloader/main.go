@@ -25,6 +25,13 @@ import (
 	"tgdl-bot/internal/taskevent"
 )
 
+const (
+	staleRunningRecoveryInterval = time.Minute
+	staleRunningRecoveryBuffer   = 5 * time.Minute
+	staleRunningRecoveryLimit    = 200
+	staleRunningRecoveryMessage  = "任务超过超时阈值后仍未收到终态回写，已自动回收"
+)
+
 type preflightHook interface {
 	Check(context.Context, config.Config) error
 }
@@ -67,8 +74,11 @@ type queueConsumer interface {
 }
 
 type taskService interface {
+	GetTask(ctx context.Context, taskID string) (service.Task, error)
 	UpdateTask(ctx context.Context, taskID string, update service.TaskUpdate) error
 	ListFailedTasksForRetry(ctx context.Context, maxRetryCount int, limit int) ([]service.Task, error)
+	ListStaleRunningTasks(ctx context.Context, startedBefore time.Time, limit int) ([]service.Task, error)
+	RecoverRunningTaskAsFailed(ctx context.Context, taskID string, startedBefore, finishedAt time.Time, errorMessage string) (bool, error)
 	ClaimTaskForExecution(ctx context.Context, req service.ClaimTaskExecutionRequest) (service.Task, bool, error)
 }
 
@@ -106,11 +116,17 @@ func (l queuePullLoop) Run(ctx context.Context, cfg config.Config) error {
 		"queue_batch_size", cfg.Cloudflare.QueueBatchSize,
 	)
 	l.requeueFailedTasksOnStartup(ctx)
+	l.recoverStaleRunningTasks(ctx, cfg)
+	recoveryTicker := time.NewTicker(staleRunningRecoveryInterval)
+	defer recoveryTicker.Stop()
 
 	for {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
+		case <-recoveryTicker.C:
+			l.recoverStaleRunningTasks(ctx, cfg)
+			continue
 		default:
 		}
 
@@ -304,6 +320,14 @@ func (l queuePullLoop) processMessage(ctx context.Context, cfg config.Config, me
 			OutputSummary: &out,
 			FinishedAt:    &finishedAt,
 		}); err != nil {
+			if errors.Is(err, service.ErrTaskNotFound) {
+				l.logger.Info("task removed before done update, ack lease",
+					"task_id", task.TaskID,
+					"lease_id", message.LeaseID,
+				)
+				_ = l.queue.Ack(ctx, []string{message.LeaseID})
+				return
+			}
 			l.logger.Error("mark task done failed", "task_id", task.TaskID, "error", err)
 			_ = l.queue.Retry(ctx, []string{message.LeaseID})
 			return
@@ -354,6 +378,15 @@ func (l queuePullLoop) processMessage(ctx context.Context, cfg config.Config, me
 		update.ExitCode = &exitCode
 	}
 	if err := l.tasks.UpdateTask(ctx, task.TaskID, update); err != nil {
+		if errors.Is(err, service.ErrTaskNotFound) {
+			l.logger.Info("task removed before failure update, ack lease",
+				"task_id", task.TaskID,
+				"lease_id", message.LeaseID,
+				"status_to", status,
+			)
+			_ = l.queue.Ack(ctx, []string{message.LeaseID})
+			return
+		}
 		l.logger.Error("update failed task state failed", "task_id", task.TaskID, "error", err)
 		_ = l.queue.Retry(ctx, []string{message.LeaseID})
 		return
@@ -395,6 +428,51 @@ func (l queuePullLoop) processMessage(ctx context.Context, cfg config.Config, me
 		"error_class", errorClass,
 	)
 	_ = l.queue.Ack(ctx, []string{message.LeaseID})
+}
+
+func (l queuePullLoop) recoverStaleRunningTasks(ctx context.Context, cfg config.Config) {
+	if l.tasks == nil {
+		return
+	}
+
+	timeout := time.Duration(cfg.Downloader.TaskTimeoutMinutes) * time.Minute
+	if timeout <= 0 {
+		timeout = 60 * time.Minute
+	}
+	startedBefore := time.Now().UTC().Add(-(timeout + staleRunningRecoveryBuffer))
+	tasks, err := l.tasks.ListStaleRunningTasks(ctx, startedBefore, staleRunningRecoveryLimit)
+	if err != nil {
+		l.logger.Error("stale running task scan failed", "error", err)
+		return
+	}
+	if len(tasks) == 0 {
+		return
+	}
+
+	for _, task := range tasks {
+		finishedAt := time.Now().UTC()
+		recovered, err := l.tasks.RecoverRunningTaskAsFailed(ctx, task.TaskID, startedBefore, finishedAt, staleRunningRecoveryMessage)
+		if err != nil {
+			l.logger.Error("stale running task recovery failed", "task_id", task.TaskID, "error", err)
+			continue
+		}
+		if !recovered {
+			continue
+		}
+		recoveredTask, err := l.tasks.GetTask(ctx, task.TaskID)
+		if err != nil {
+			if !errors.Is(err, service.ErrTaskNotFound) {
+				l.logger.Error("stale running task reload failed", "task_id", task.TaskID, "error", err)
+			}
+			continue
+		}
+		l.logger.Warn("stale running task recovered",
+			"task_id", recoveredTask.TaskID,
+			"started_before", startedBefore.Format(time.RFC3339),
+			"status_to", service.StatusFailed,
+		)
+		l.publishTaskStatusEvent(ctx, recoveredTask)
+	}
 }
 
 func (l queuePullLoop) publishTaskStatusEvent(ctx context.Context, task service.Task) {

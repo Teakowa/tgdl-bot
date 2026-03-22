@@ -23,10 +23,13 @@ type TaskRepository interface {
 	DeleteFailedByIdempotencyKey(ctx context.Context, idempotencyKey string) (int64, error)
 	DeletePendingByUserTaskID(ctx context.Context, userID int64, taskID string) (int64, error)
 	DeleteNonRunningByUserTaskID(ctx context.Context, userID int64, taskID string) (int64, error)
+	ForceDeleteByUserTaskID(ctx context.Context, userID int64, taskID string) (int64, error)
 	PauseByUserTaskID(ctx context.Context, userID int64, taskID string, updatedAt time.Time) (int64, error)
 	ResumeByUserTaskID(ctx context.Context, userID int64, taskID string, updatedAt time.Time) (int64, error)
 	CancelByUserTaskID(ctx context.Context, userID int64, taskID string, updatedAt time.Time) (int64, error)
 	ListRecentByUser(ctx context.Context, userID int64, limit int) ([]service.Task, error)
+	ListStaleRunning(ctx context.Context, startedBefore time.Time, limit int) ([]service.Task, error)
+	RecoverRunningAsFailed(ctx context.Context, taskID string, startedBefore, finishedAt time.Time, errorMessage string) (int64, error)
 	ClaimForExecution(ctx context.Context, taskID, leaseID string, startedAt time.Time) (service.Task, bool, error)
 }
 
@@ -366,6 +369,24 @@ func (r *D1TaskRepository) DeleteNonRunningByUserTaskID(ctx context.Context, use
 	return result.Meta.Changes, nil
 }
 
+func (r *D1TaskRepository) ForceDeleteByUserTaskID(ctx context.Context, userID int64, taskID string) (int64, error) {
+	if r == nil || r.Client == nil {
+		return 0, errors.New("storage: nil d1 task repository")
+	}
+
+	result, err := r.Client.Query(ctx, `
+		DELETE FROM tasks
+		WHERE task_id = ?
+		  AND user_id = ?`,
+		taskID,
+		userID,
+	)
+	if err != nil {
+		return 0, fmt.Errorf("storage: force delete task %q for user %d: %w", taskID, userID, err)
+	}
+	return result.Meta.Changes, nil
+}
+
 func (r *D1TaskRepository) PauseByUserTaskID(ctx context.Context, userID int64, taskID string, updatedAt time.Time) (int64, error) {
 	if r == nil || r.Client == nil {
 		return 0, errors.New("storage: nil d1 task repository")
@@ -468,6 +489,72 @@ func (r *D1TaskRepository) ListRecentByUser(ctx context.Context, userID int64, l
 		tasks = append(tasks, task)
 	}
 	return tasks, nil
+}
+
+func (r *D1TaskRepository) ListStaleRunning(ctx context.Context, startedBefore time.Time, limit int) ([]service.Task, error) {
+	if r == nil || r.Client == nil {
+		return nil, errors.New("storage: nil d1 task repository")
+	}
+	if startedBefore.IsZero() {
+		return nil, errors.New("storage: started before time is required")
+	}
+	if limit <= 0 {
+		limit = 100
+	}
+
+	result, err := r.Client.Query(ctx, `
+		SELECT task_id, chat_id, user_id, target_peer, url, drop_caption, status, idempotency_key,
+		       retry_count, source_message_id, status_message_id, lease_id, output_summary, error_message, exit_code,
+		       created_at, updated_at, started_at, finished_at
+		FROM tasks
+		WHERE status = ?
+		  AND started_at IS NOT NULL
+		  AND started_at <= ?
+		ORDER BY started_at ASC
+		LIMIT ?`,
+		string(service.StatusRunning),
+		nullableTime(startedBefore.UTC()),
+		limit,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("storage: list stale running tasks before %s: %w", startedBefore.UTC().Format(time.RFC3339), err)
+	}
+
+	tasks := make([]service.Task, 0, len(result.Results))
+	for _, row := range result.Results {
+		task, err := taskFromResultRow(row)
+		if err != nil {
+			return nil, fmt.Errorf("storage: decode stale running task row: %w", err)
+		}
+		tasks = append(tasks, task)
+	}
+	return tasks, nil
+}
+
+func (r *D1TaskRepository) RecoverRunningAsFailed(ctx context.Context, taskID string, startedBefore, finishedAt time.Time, errorMessage string) (int64, error) {
+	if r == nil || r.Client == nil {
+		return 0, errors.New("storage: nil d1 task repository")
+	}
+
+	result, err := r.Client.Query(ctx, `
+		UPDATE tasks
+		SET status = ?, error_message = ?, finished_at = ?, updated_at = ?, lease_id = NULL
+		WHERE task_id = ?
+		  AND status = ?
+		  AND started_at IS NOT NULL
+		  AND started_at <= ?`,
+		string(service.StatusFailed),
+		errorMessage,
+		nullableTime(finishedAt.UTC()),
+		nullableTime(finishedAt.UTC()),
+		taskID,
+		string(service.StatusRunning),
+		nullableTime(startedBefore.UTC()),
+	)
+	if err != nil {
+		return 0, fmt.Errorf("storage: recover running task %q as failed: %w", taskID, err)
+	}
+	return result.Meta.Changes, nil
 }
 
 func (r *D1TaskRepository) ClaimForExecution(ctx context.Context, taskID, leaseID string, startedAt time.Time) (service.Task, bool, error) {

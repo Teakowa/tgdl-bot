@@ -24,11 +24,13 @@ type fakeTaskQuery struct {
 	deleteFailedFn       func(string) (int64, error)
 	deletePendingFn      func(int64, string) (bool, error)
 	deleteNonRunningFn   func(int64, string) (bool, error)
+	forceDeleteFn        func(int64, string) (bool, error)
 	pauseFn              func(int64, string) (bool, error)
 	resumeFn             func(int64, string) (bool, error)
 	cancelFn             func(int64, string) (bool, error)
 	deletePendingResp    bool
 	deleteNonRunningResp bool
+	forceDeleteResp      bool
 	pauseResp            bool
 	resumeResp           bool
 	cancelResp           bool
@@ -145,6 +147,16 @@ func (f *fakeTaskQuery) DeleteTaskNonRunning(_ context.Context, userID int64, ta
 	return f.deleteNonRunningResp, nil
 }
 
+func (f *fakeTaskQuery) ForceDeleteTask(_ context.Context, userID int64, taskID string) (bool, error) {
+	if f.forceDeleteFn != nil {
+		return f.forceDeleteFn(userID, taskID)
+	}
+	if f.err != nil {
+		return false, f.err
+	}
+	return f.forceDeleteResp, nil
+}
+
 func (f *fakeTaskQuery) PauseTask(_ context.Context, userID int64, taskID string) (bool, error) {
 	if f.pauseFn != nil {
 		return f.pauseFn(userID, taskID)
@@ -173,6 +185,20 @@ func (f *fakeTaskQuery) CancelTask(_ context.Context, userID int64, taskID strin
 		return false, f.err
 	}
 	return f.cancelResp, nil
+}
+
+func (f *fakeTaskQuery) ListStaleRunningTasks(context.Context, time.Time, int) ([]service.Task, error) {
+	if f.err != nil {
+		return nil, f.err
+	}
+	return nil, nil
+}
+
+func (f *fakeTaskQuery) RecoverRunningTaskAsFailed(context.Context, string, time.Time, time.Time, string) (bool, error) {
+	if f.err != nil {
+		return false, f.err
+	}
+	return false, nil
 }
 
 func (f *fakeTaskQuery) ClaimTaskForExecution(context.Context, service.ClaimTaskExecutionRequest) (service.Task, bool, error) {
@@ -338,7 +364,7 @@ func TestHandlerDeleteCommandForce(t *testing.T) {
 			UserID: 1,
 			Status: service.StatusFailed,
 		},
-		deleteNonRunningResp: true,
+		forceDeleteResp: true,
 	}
 	h := Handler{Tasks: tasks}
 
@@ -358,7 +384,7 @@ func TestHandlerDeleteCommandForceStatusChanged(t *testing.T) {
 			UserID: 1,
 			Status: service.StatusDone,
 		},
-		deleteNonRunningResp: false,
+		forceDeleteResp: false,
 	}
 	h := Handler{Tasks: tasks}
 
@@ -371,7 +397,7 @@ func TestHandlerDeleteCommandForceStatusChanged(t *testing.T) {
 	}
 }
 
-func TestHandlerDeleteCommandForceRejectsRunning(t *testing.T) {
+func TestHandlerDeleteCommandForceAllowsRunning(t *testing.T) {
 	deleteCalls := 0
 	tasks := &fakeTaskQuery{
 		task: service.Task{
@@ -379,7 +405,7 @@ func TestHandlerDeleteCommandForceRejectsRunning(t *testing.T) {
 			UserID: 1,
 			Status: service.StatusRunning,
 		},
-		deleteNonRunningFn: func(int64, string) (bool, error) {
+		forceDeleteFn: func(int64, string) (bool, error) {
 			deleteCalls++
 			return true, nil
 		},
@@ -390,11 +416,11 @@ func TestHandlerDeleteCommandForceRejectsRunning(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !strings.Contains(reply, "无法强制删除") {
+	if !strings.Contains(reply, "仅删除记录，不终止当前执行") {
 		t.Fatalf("unexpected force delete running reply: %s", reply)
 	}
-	if deleteCalls != 0 {
-		t.Fatalf("expected no force delete call for running task, got %d", deleteCalls)
+	if deleteCalls != 1 {
+		t.Fatalf("expected one force delete call for running task, got %d", deleteCalls)
 	}
 }
 
@@ -842,11 +868,37 @@ func TestHandleCallbackQueueRunningTaskShowsNoMutationActions(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !strings.Contains(outcome.Reply, "暂不支持操作") {
+	if !strings.Contains(outcome.Reply, "可强制删除记录") {
 		t.Fatalf("unexpected running task reply: %s", outcome.Reply)
 	}
-	if outcome.ReplyMarkup == nil || len(outcome.ReplyMarkup.InlineKeyboard) != 1 || outcome.ReplyMarkup.InlineKeyboard[0][0].Text != "返回队列" {
+	if outcome.ReplyMarkup == nil || len(outcome.ReplyMarkup.InlineKeyboard) != 2 || outcome.ReplyMarkup.InlineKeyboard[0][0].Text != "强制删除" {
 		t.Fatalf("unexpected running task keyboard: %+v", outcome.ReplyMarkup)
+	}
+}
+
+func TestHandleCallbackQueueForceDeleteRunning(t *testing.T) {
+	const taskID = "task-123456"
+	tasks := &fakeTaskQuery{
+		task: service.Task{
+			TaskID: taskID,
+			UserID: 1,
+			URL:    "https://t.me/c/1/2",
+			Status: service.StatusRunning,
+		},
+		queueTasks:      []service.Task{{TaskID: "task-b", UserID: 1, Status: service.StatusQueued, URL: "https://t.me/c/1/3"}},
+		forceDeleteResp: true,
+	}
+
+	h := Handler{Tasks: tasks}
+	outcome, err := h.HandleCallback(context.Background(), 1, "cb-1", callbackQueueForcePrefix+taskID)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(outcome.Reply, "仅删除记录，不终止当前执行") {
+		t.Fatalf("unexpected force delete callback reply: %s", outcome.Reply)
+	}
+	if outcome.AnswerText != "已强制删除" {
+		t.Fatalf("unexpected force delete callback answer: %s", outcome.AnswerText)
 	}
 }
 

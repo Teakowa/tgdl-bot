@@ -104,9 +104,12 @@ type TaskService interface {
 	DeleteFailedByIdempotencyKey(ctx context.Context, idempotencyKey string) (int64, error)
 	DeletePendingTask(ctx context.Context, userID int64, taskID string) (bool, error)
 	DeleteTaskNonRunning(ctx context.Context, userID int64, taskID string) (bool, error)
+	ForceDeleteTask(ctx context.Context, userID int64, taskID string) (bool, error)
 	PauseTask(ctx context.Context, userID int64, taskID string) (bool, error)
 	ResumeTask(ctx context.Context, userID int64, taskID string) (bool, error)
 	CancelTask(ctx context.Context, userID int64, taskID string) (bool, error)
+	ListStaleRunningTasks(ctx context.Context, startedBefore time.Time, limit int) ([]Task, error)
+	RecoverRunningTaskAsFailed(ctx context.Context, taskID string, startedBefore, finishedAt time.Time, errorMessage string) (bool, error)
 	ClaimTaskForExecution(ctx context.Context, req ClaimTaskExecutionRequest) (Task, bool, error)
 	UpdateTask(ctx context.Context, taskID string, update TaskUpdate) error
 }

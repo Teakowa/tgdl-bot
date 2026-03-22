@@ -25,6 +25,7 @@ const (
 	callbackQueueResumePrefix = "qresume:"
 	callbackQueueCancelPrefix = "qcancel:"
 	callbackQueueRetryPrefix  = "qretry:"
+	callbackQueueForcePrefix  = "qforce:"
 	callbackDeletePrefix      = "qdel:"
 	callbackDeleteOKPrefix    = "qdelok:"
 	callbackDeleteNoPrefix    = "qdelno:"
@@ -252,6 +253,16 @@ func (h Handler) HandleCallback(ctx context.Context, userID int64, callbackID, d
 			return HandleCallbackOutcome{}, err
 		}
 		return h.buildQueueRefreshCallback(ctx, userID, outcome.Reply, "已重试")
+	case strings.HasPrefix(data, callbackQueueForcePrefix):
+		taskID := parseCallbackTaskID(data, callbackQueueForcePrefix)
+		if taskID == "" {
+			return HandleCallbackOutcome{Reply: "无效任务 ID。", AnswerText: "参数错误"}, nil
+		}
+		outcome, err := h.handleDeleteByTaskID(ctx, userID, taskID, true)
+		if err != nil {
+			return HandleCallbackOutcome{}, err
+		}
+		return h.buildQueueRefreshCallback(ctx, userID, outcome.Reply, "已强制删除")
 	case strings.HasPrefix(data, callbackDeletePrefix):
 		taskID := parseCallbackTaskID(data, callbackDeletePrefix)
 		if taskID == "" {
@@ -457,19 +468,21 @@ func (h Handler) handleDeleteByTaskID(ctx context.Context, userID int64, taskID 
 	}
 
 	if task.Status == service.StatusRunning {
-		if force {
-			return HandleTextOutcome{Reply: "任务正在执行中，无法强制删除。"}, nil
+		if !force {
+			return HandleTextOutcome{Reply: "任务正在执行中，无法删除。"}, nil
 		}
-		return HandleTextOutcome{Reply: "任务正在执行中，无法删除。"}, nil
 	}
 
 	if force {
-		deleted, err := h.Tasks.DeleteTaskNonRunning(ctx, userID, taskID)
+		deleted, err := h.Tasks.ForceDeleteTask(ctx, userID, taskID)
 		if err != nil {
 			return HandleTextOutcome{}, err
 		}
 		if !deleted {
 			return HandleTextOutcome{Reply: "任务状态已变化，请刷新 /queue。"}, nil
+		}
+		if task.Status == service.StatusRunning {
+			return HandleTextOutcome{Reply: fmt.Sprintf("任务已强制删除（仅删除记录，不终止当前执行）\nTask ID: %s", taskID)}, nil
 		}
 		return HandleTextOutcome{Reply: fmt.Sprintf("任务已强制删除\nTask ID: %s", taskID)}, nil
 	}
@@ -732,6 +745,10 @@ func buildDeleteConfirmKeyboard(taskID string) *telegram.InlineKeyboardMarkup {
 func buildQueueTaskActionKeyboard(task service.Task) *telegram.InlineKeyboardMarkup {
 	rows := make([][]telegram.InlineKeyboardButton, 0, 3)
 	switch task.Status {
+	case service.StatusRunning:
+		rows = append(rows, []telegram.InlineKeyboardButton{
+			{Text: "强制删除", CallbackData: callbackQueueForcePrefix + task.TaskID},
+		})
 	case service.StatusQueued, service.StatusRetrying:
 		rows = append(rows, []telegram.InlineKeyboardButton{
 			{Text: "暂停", CallbackData: callbackQueuePausePrefix + task.TaskID},
@@ -794,7 +811,7 @@ func formatQueueTaskDetail(task service.Task) string {
 		lines = append(lines, fmt.Sprintf("最近错误: %s", *task.ErrorMessage))
 	}
 	if task.Status == service.StatusRunning {
-		lines = append(lines, "当前运行中，暂不支持操作。")
+		lines = append(lines, "当前运行中，可强制删除记录，但不会终止当前执行。")
 	}
 	return strings.Join(lines, "\n")
 }

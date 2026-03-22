@@ -21,10 +21,13 @@ type TaskRepository interface {
 	DeleteFailedByIdempotencyKey(ctx context.Context, idempotencyKey string) (int64, error)
 	DeletePendingByUserTaskID(ctx context.Context, userID int64, taskID string) (int64, error)
 	DeleteNonRunningByUserTaskID(ctx context.Context, userID int64, taskID string) (int64, error)
+	ForceDeleteByUserTaskID(ctx context.Context, userID int64, taskID string) (int64, error)
 	PauseByUserTaskID(ctx context.Context, userID int64, taskID string, updatedAt time.Time) (int64, error)
 	ResumeByUserTaskID(ctx context.Context, userID int64, taskID string, updatedAt time.Time) (int64, error)
 	CancelByUserTaskID(ctx context.Context, userID int64, taskID string, updatedAt time.Time) (int64, error)
 	ListRecentByUser(ctx context.Context, userID int64, limit int) ([]Task, error)
+	ListStaleRunning(ctx context.Context, startedBefore time.Time, limit int) ([]Task, error)
+	RecoverRunningAsFailed(ctx context.Context, taskID string, startedBefore, finishedAt time.Time, errorMessage string) (int64, error)
 	ClaimForExecution(ctx context.Context, taskID, leaseID string, startedAt time.Time) (Task, bool, error)
 }
 
@@ -204,6 +207,23 @@ func (s taskService) DeleteTaskNonRunning(ctx context.Context, userID int64, tas
 	return rows > 0, nil
 }
 
+func (s taskService) ForceDeleteTask(ctx context.Context, userID int64, taskID string) (bool, error) {
+	if s.repo == nil {
+		return false, errors.New("service: task repository is required")
+	}
+	if userID == 0 {
+		return false, errors.New("service: user id is required")
+	}
+	if strings.TrimSpace(taskID) == "" {
+		return false, errors.New("service: task id is required")
+	}
+	rows, err := s.repo.ForceDeleteByUserTaskID(ctx, userID, strings.TrimSpace(taskID))
+	if err != nil {
+		return false, fmt.Errorf("service: force delete task: %w", err)
+	}
+	return rows > 0, nil
+}
+
 func (s taskService) PauseTask(ctx context.Context, userID int64, taskID string) (bool, error) {
 	if s.repo == nil {
 		return false, errors.New("service: task repository is required")
@@ -251,6 +271,43 @@ func (s taskService) CancelTask(ctx context.Context, userID int64, taskID string
 	rows, err := s.repo.CancelByUserTaskID(ctx, userID, strings.TrimSpace(taskID), time.Now().UTC())
 	if err != nil {
 		return false, fmt.Errorf("service: cancel task: %w", err)
+	}
+	return rows > 0, nil
+}
+
+func (s taskService) ListStaleRunningTasks(ctx context.Context, startedBefore time.Time, limit int) ([]Task, error) {
+	if s.repo == nil {
+		return nil, errors.New("service: task repository is required")
+	}
+	if startedBefore.IsZero() {
+		return nil, errors.New("service: started before time is required")
+	}
+	tasks, err := s.repo.ListStaleRunning(ctx, startedBefore.UTC(), limit)
+	if err != nil {
+		return nil, fmt.Errorf("service: list stale running tasks: %w", err)
+	}
+	return tasks, nil
+}
+
+func (s taskService) RecoverRunningTaskAsFailed(ctx context.Context, taskID string, startedBefore, finishedAt time.Time, errorMessage string) (bool, error) {
+	if s.repo == nil {
+		return false, errors.New("service: task repository is required")
+	}
+	if strings.TrimSpace(taskID) == "" {
+		return false, errors.New("service: task id is required")
+	}
+	if startedBefore.IsZero() {
+		return false, errors.New("service: started before time is required")
+	}
+	if finishedAt.IsZero() {
+		return false, errors.New("service: finished at time is required")
+	}
+	if strings.TrimSpace(errorMessage) == "" {
+		return false, errors.New("service: error message is required")
+	}
+	rows, err := s.repo.RecoverRunningAsFailed(ctx, strings.TrimSpace(taskID), startedBefore.UTC(), finishedAt.UTC(), strings.TrimSpace(errorMessage))
+	if err != nil {
+		return false, fmt.Errorf("service: recover running task as failed: %w", err)
 	}
 	return rows > 0, nil
 }

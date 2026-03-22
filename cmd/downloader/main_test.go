@@ -75,8 +75,30 @@ type fakeTasks struct {
 	task           service.Task
 	claimed        bool
 	claimErr       error
+	getTaskErr     error
+	updateErr      error
+	updateFn       func(string, service.TaskUpdate) error
 	updates        []service.TaskUpdate
 	failedForRetry []service.Task
+	staleRunning   []service.Task
+	recoverOK      bool
+	recoverErr     error
+	recovered      []string
+}
+
+func (f *fakeTasks) GetTask(_ context.Context, taskID string) (service.Task, error) {
+	if f.getTaskErr != nil {
+		return service.Task{}, f.getTaskErr
+	}
+	if f.task.TaskID == taskID {
+		return f.task, nil
+	}
+	for _, task := range f.staleRunning {
+		if task.TaskID == taskID {
+			return task, nil
+		}
+	}
+	return service.Task{}, service.ErrTaskNotFound
 }
 
 func (f *fakeTasks) ClaimTaskForExecution(_ context.Context, _ service.ClaimTaskExecutionRequest) (service.Task, bool, error) {
@@ -88,7 +110,15 @@ func (f *fakeTasks) ClaimTaskForExecution(_ context.Context, _ service.ClaimTask
 	}
 	return f.task, true, nil
 }
-func (f *fakeTasks) UpdateTask(_ context.Context, _ string, update service.TaskUpdate) error {
+func (f *fakeTasks) UpdateTask(_ context.Context, taskID string, update service.TaskUpdate) error {
+	if f.updateFn != nil {
+		if err := f.updateFn(taskID, update); err != nil {
+			return err
+		}
+	}
+	if f.updateErr != nil {
+		return f.updateErr
+	}
 	f.updates = append(f.updates, update)
 	if update.Status != "" {
 		f.task.Status = update.Status
@@ -126,6 +156,26 @@ func (f *fakeTasks) UpdateTask(_ context.Context, _ string, update service.TaskU
 }
 func (f *fakeTasks) ListFailedTasksForRetry(context.Context, int, int) ([]service.Task, error) {
 	return f.failedForRetry, nil
+}
+
+func (f *fakeTasks) ListStaleRunningTasks(context.Context, time.Time, int) ([]service.Task, error) {
+	return f.staleRunning, nil
+}
+
+func (f *fakeTasks) RecoverRunningTaskAsFailed(_ context.Context, taskID string, _ time.Time, finishedAt time.Time, errorMessage string) (bool, error) {
+	if f.recoverErr != nil {
+		return false, f.recoverErr
+	}
+	f.recovered = append(f.recovered, taskID)
+	for i := range f.staleRunning {
+		if f.staleRunning[i].TaskID == taskID {
+			f.staleRunning[i].Status = service.StatusFailed
+			f.staleRunning[i].FinishedAt = &finishedAt
+			msg := errorMessage
+			f.staleRunning[i].ErrorMessage = &msg
+		}
+	}
+	return f.recoverOK, nil
 }
 
 type fakeRunnerImpl struct {
@@ -313,6 +363,46 @@ func TestQueuePullLoopStatusPublishFailureDoesNotAffectAck(t *testing.T) {
 	}
 }
 
+func TestQueuePullLoopProcessMessageDoneUpdateNotFoundAcks(t *testing.T) {
+	q := &fakeQueue{}
+	tasks := &fakeTasks{
+		claimed: true,
+		task: service.Task{
+			TaskID:     "t1",
+			URL:        "https://t.me/c/1/2",
+			TargetPeer: "100",
+			Status:     service.StatusQueued,
+		},
+		updateFn: func(_ string, update service.TaskUpdate) error {
+			if update.Status == service.StatusDone {
+				return service.ErrTaskNotFound
+			}
+			return nil
+		},
+	}
+	loop := queuePullLoop{
+		logger: slog.Default(),
+		queue:  q,
+		tasks:  tasks,
+		runner: fakeRunnerImpl{build: func(ctx context.Context, _ dl.DownloadRequest) (*exec.Cmd, error) {
+			return exec.CommandContext(ctx, "sh", "-c", "echo ok"), nil
+		}},
+		maxAttempts: 3,
+	}
+
+	loop.processMessage(context.Background(), config.Config{Downloader: config.DownloaderConfig{TaskTimeoutMinutes: 1}}, queue.ReceivedMessage{
+		LeaseID: "lease-done-notfound",
+		Body:    queue.Message{TaskID: "t1"},
+	})
+
+	if len(q.acked) != 1 || q.acked[0] != "lease-done-notfound" {
+		t.Fatalf("expected lease to be acked, got %+v", q.acked)
+	}
+	if len(q.retried) != 0 {
+		t.Fatalf("expected no retry, got %+v", q.retried)
+	}
+}
+
 func TestQueuePullLoopProcessMessageNonRetryableAcks(t *testing.T) {
 	q := &fakeQueue{}
 	tasks := &fakeTasks{
@@ -438,6 +528,47 @@ func TestQueuePullLoopProcessMessageRetryableExhaustedDeadLettered(t *testing.T)
 	}
 }
 
+func TestQueuePullLoopProcessMessageFailedUpdateNotFoundAcks(t *testing.T) {
+	q := &fakeQueue{}
+	tasks := &fakeTasks{
+		claimed: true,
+		task: service.Task{
+			TaskID:     "t1",
+			URL:        "https://t.me/c/1/2",
+			TargetPeer: "100",
+			Status:     service.StatusQueued,
+			RetryCount: 0,
+		},
+		updateFn: func(_ string, update service.TaskUpdate) error {
+			if update.Status == service.StatusRetrying {
+				return service.ErrTaskNotFound
+			}
+			return nil
+		},
+	}
+	loop := queuePullLoop{
+		logger: slog.Default(),
+		queue:  q,
+		tasks:  tasks,
+		runner: fakeRunnerImpl{build: func(ctx context.Context, _ dl.DownloadRequest) (*exec.Cmd, error) {
+			return exec.CommandContext(ctx, "sh", "-c", "echo 'connection reset by peer' 1>&2; exit 1"), nil
+		}},
+		maxAttempts: 3,
+	}
+
+	loop.processMessage(context.Background(), config.Config{Downloader: config.DownloaderConfig{TaskTimeoutMinutes: 1}}, queue.ReceivedMessage{
+		LeaseID: "lease-fail-notfound",
+		Body:    queue.Message{TaskID: "t1"},
+	})
+
+	if len(q.acked) != 1 || q.acked[0] != "lease-fail-notfound" {
+		t.Fatalf("expected lease to be acked, got %+v", q.acked)
+	}
+	if len(q.retried) != 0 {
+		t.Fatalf("expected no retry, got %+v", q.retried)
+	}
+}
+
 func TestClassifyTDLErrorTimeoutAndKeyword(t *testing.T) {
 	t.Run("context deadline", func(t *testing.T) {
 		runCtx, cancel := context.WithTimeout(context.Background(), time.Millisecond)
@@ -527,6 +658,57 @@ func TestQueuePullLoopRunRequeuesFailedTasksOnStartup(t *testing.T) {
 	}
 	if len(tasks.updates) != 1 || tasks.updates[0].Status != service.StatusRetrying {
 		t.Fatalf("expected retrying status update, got %+v", tasks.updates)
+	}
+}
+
+func TestQueuePullLoopRunRecoversStaleRunningTasksOnStartup(t *testing.T) {
+	q := &fakeQueue{}
+	statusQueue := &fakeQueue{}
+	startedAt := time.Now().Add(-3 * time.Hour).UTC()
+	tasks := &fakeTasks{
+		recoverOK: true,
+		staleRunning: []service.Task{
+			{
+				TaskID:     "stale-task",
+				ChatID:     1,
+				UserID:     2,
+				URL:        "https://t.me/c/1/2",
+				Status:     service.StatusRunning,
+				StartedAt:  &startedAt,
+				CreatedAt:  startedAt,
+				UpdatedAt:  startedAt,
+				TargetPeer: "100",
+			},
+		},
+	}
+	loop := queuePullLoop{
+		logger:      slog.Default(),
+		queue:       q,
+		statusQueue: statusQueue,
+		tasks:       tasks,
+		runner:      fakeRunnerImpl{build: func(context.Context, dl.DownloadRequest) (*exec.Cmd, error) { return nil, errors.New("unused") }},
+		maxAttempts: 3,
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	_ = loop.Run(ctx, config.Config{
+		Cloudflare: config.CloudflareConfig{
+			QueuePullIntervalMS: 10,
+			QueueBatchSize:      1,
+		},
+		Downloader: config.DownloaderConfig{
+			Workers:            1,
+			TaskTimeoutMinutes: 1,
+		},
+	})
+
+	if len(tasks.recovered) != 1 || tasks.recovered[0] != "stale-task" {
+		t.Fatalf("expected stale task recovered, got %+v", tasks.recovered)
+	}
+	if len(statusQueue.enqueued) != 1 || statusQueue.enqueued[0].Status != string(service.StatusFailed) {
+		t.Fatalf("expected failed status event, got %+v", statusQueue.enqueued)
 	}
 }
 
