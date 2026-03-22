@@ -43,7 +43,7 @@ func TestBuildCommandReply(t *testing.T) {
 	if got := BuildCommandReply(ParsedCommand{Name: CommandDelete}); !containsAll(got, "用法: /delete [task_id] [-f|--force]", "不带 task_id") {
 		t.Fatalf("unexpected delete help: %s", got)
 	}
-	if got := BuildCommandReply(ParsedCommand{Name: CommandRetry}); !containsAll(got, "用法: /retry [task_id]", "不带 task_id") {
+	if got := BuildCommandReply(ParsedCommand{Name: CommandRetry}); !containsAll(got, "用法: /retry [task_id]", "不带 task_id", "替换旧任务记录并新建任务") {
 		t.Fatalf("unexpected retry help: %s", got)
 	}
 	if got := BuildCommandReply(ParsedCommand{Name: CommandForward}); got != "用法: /forward <source_url> <target> [--drop-caption]" {

@@ -721,12 +721,13 @@ func TestHandlerRetryCommandRebuildsAndEnqueues(t *testing.T) {
 	}
 }
 
-func TestHandlerRetryCommandRejectsNonFailedStatus(t *testing.T) {
+func TestHandlerRetryCommandShowsRunningTaskMenu(t *testing.T) {
 	h := Handler{
 		Tasks: &fakeTaskQuery{
 			task: service.Task{
 				TaskID: "task-a",
 				UserID: 1,
+				URL:    "https://t.me/c/1/2",
 				Status: service.StatusRunning,
 			},
 		},
@@ -736,7 +737,7 @@ func TestHandlerRetryCommandRejectsNonFailedStatus(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !strings.Contains(reply, "不支持重试") {
+	if !strings.Contains(reply, "不会停止旧的实际执行") {
 		t.Fatalf("unexpected retry reply: %s", reply)
 	}
 }
@@ -747,6 +748,7 @@ func TestHandlerRetryCommandWithoutTaskIDShowsRetrySelection(t *testing.T) {
 			{TaskID: "task-a", Status: service.StatusFailed, URL: "https://t.me/c/1/2"},
 			{TaskID: "task-b", Status: service.StatusQueued, URL: "https://t.me/c/1/3"},
 			{TaskID: "task-c", Status: service.StatusDeadLettered, URL: "https://t.me/c/1/4"},
+			{TaskID: "task-d", Status: service.StatusRunning, URL: "https://t.me/c/1/5"},
 		}},
 		Queue: &fakeQueue{},
 	}
@@ -758,7 +760,7 @@ func TestHandlerRetryCommandWithoutTaskIDShowsRetrySelection(t *testing.T) {
 	if outcome.Reply != "请选择要重试的任务：" {
 		t.Fatalf("unexpected retry selection reply: %s", outcome.Reply)
 	}
-	if outcome.ReplyMarkup == nil || len(outcome.ReplyMarkup.InlineKeyboard) != 2 {
+	if outcome.ReplyMarkup == nil || len(outcome.ReplyMarkup.InlineKeyboard) != 4 {
 		t.Fatalf("expected retry selection keyboard, got %+v", outcome.ReplyMarkup)
 	}
 }
@@ -766,7 +768,7 @@ func TestHandlerRetryCommandWithoutTaskIDShowsRetrySelection(t *testing.T) {
 func TestHandlerRetryCommandWithoutTaskIDShowsEmptyState(t *testing.T) {
 	h := Handler{
 		Tasks: &fakeTaskQuery{queueTasks: []service.Task{
-			{TaskID: "task-a", Status: service.StatusQueued, URL: "https://t.me/c/1/2"},
+			{TaskID: "task-a", Status: service.StatusDone, URL: "https://t.me/c/1/2"},
 		}},
 		Queue: &fakeQueue{},
 	}
@@ -842,7 +844,7 @@ func TestHandleCallbackQueueTaskMenuShowsStatusSpecificActions(t *testing.T) {
 		t.Fatalf("expected action keyboard, got %+v", outcome.ReplyMarkup)
 	}
 	row := outcome.ReplyMarkup.InlineKeyboard[0]
-	if row[0].Text != "继续" || row[1].Text != "取消" {
+	if row[0].Text != "重试" {
 		t.Fatalf("unexpected paused action row: %+v", row)
 	}
 }
@@ -916,7 +918,10 @@ func TestHandleCallbackQueueRunningTaskShowsNoMutationActions(t *testing.T) {
 	if !strings.Contains(outcome.Reply, "可强制删除记录") {
 		t.Fatalf("unexpected running task reply: %s", outcome.Reply)
 	}
-	if outcome.ReplyMarkup == nil || len(outcome.ReplyMarkup.InlineKeyboard) != 2 || outcome.ReplyMarkup.InlineKeyboard[0][0].Text != "强制删除" {
+	if !strings.Contains(outcome.Reply, "不会停止旧的实际执行") {
+		t.Fatalf("unexpected running retry hint: %s", outcome.Reply)
+	}
+	if outcome.ReplyMarkup == nil || len(outcome.ReplyMarkup.InlineKeyboard) != 2 || outcome.ReplyMarkup.InlineKeyboard[0][0].Text != "重试" || outcome.ReplyMarkup.InlineKeyboard[0][1].Text != "强制删除" {
 		t.Fatalf("unexpected running task keyboard: %+v", outcome.ReplyMarkup)
 	}
 }
@@ -1003,7 +1008,7 @@ func TestHandleCallbackRetryFromRetryListRebuildsAndRefreshes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !strings.Contains(outcome.Reply, "任务已入队") {
+	if !strings.Contains(outcome.Reply, "任务已替换并重新入队") {
 		t.Fatalf("unexpected retry callback reply: %s", outcome.Reply)
 	}
 	if outcome.ReplyMarkup == nil || len(outcome.ReplyMarkup.InlineKeyboard) != 1 {
@@ -1011,6 +1016,156 @@ func TestHandleCallbackRetryFromRetryListRebuildsAndRefreshes(t *testing.T) {
 	}
 	if len(q.messages) != 1 {
 		t.Fatalf("expected one enqueue after retry callback, got %d", len(q.messages))
+	}
+}
+
+func TestHandleCallbackRetryFromQueueRunningReplacesTask(t *testing.T) {
+	const taskID = "task-running"
+	q := &fakeQueue{}
+	forceDeleteCalls := 0
+	tasks := &fakeTaskQuery{
+		task: service.Task{
+			TaskID:         taskID,
+			ChatID:         1,
+			UserID:         1,
+			URL:            "https://t.me/c/1/2",
+			Status:         service.StatusRunning,
+			IdempotencyKey: "idem-running",
+		},
+		queueTasks: []service.Task{{TaskID: "other-task", UserID: 1, Status: service.StatusQueued, URL: "https://t.me/c/1/3"}},
+		forceDeleteFn: func(userID int64, gotTaskID string) (bool, error) {
+			forceDeleteCalls++
+			if userID != 1 || gotTaskID != taskID {
+				t.Fatalf("unexpected force delete request: %d %s", userID, gotTaskID)
+			}
+			return true, nil
+		},
+	}
+	tasks.createFn = func(req service.CreateQueuedTaskRequest) (service.Task, error) {
+		return service.Task{
+			TaskID:         req.TaskID,
+			ChatID:         req.ChatID,
+			UserID:         req.UserID,
+			URL:            req.URL,
+			Status:         service.StatusQueued,
+			CreatedAt:      time.Now().UTC(),
+			IdempotencyKey: req.IdempotencyKey,
+		}, nil
+	}
+
+	h := Handler{Tasks: tasks, Queue: q}
+	outcome, err := h.HandleCallback(context.Background(), 1, "cb-1", callbackQueueRetryPrefix+encodeModeTask(taskMenuModeQueue, taskID))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(outcome.Reply, "任务已替换并重新入队") || !strings.Contains(outcome.Reply, "不会终止它") {
+		t.Fatalf("unexpected running retry reply: %s", outcome.Reply)
+	}
+	if forceDeleteCalls != 1 {
+		t.Fatalf("expected one force delete before retry, got %d", forceDeleteCalls)
+	}
+	if len(q.messages) != 1 {
+		t.Fatalf("expected one enqueue after running retry, got %d", len(q.messages))
+	}
+}
+
+func TestHandleCallbackRetryFromQueuePausedReplacesTask(t *testing.T) {
+	const taskID = "task-paused"
+	q := &fakeQueue{}
+	deleteCalls := 0
+	tasks := &fakeTaskQuery{
+		task: service.Task{
+			TaskID:         taskID,
+			ChatID:         1,
+			UserID:         1,
+			URL:            "https://t.me/c/1/2",
+			Status:         service.StatusPaused,
+			IdempotencyKey: "idem-paused",
+		},
+		queueTasks: []service.Task{{TaskID: "other-task", UserID: 1, Status: service.StatusQueued, URL: "https://t.me/c/1/3"}},
+		deleteNonRunningFn: func(userID int64, gotTaskID string) (bool, error) {
+			deleteCalls++
+			if userID != 1 || gotTaskID != taskID {
+				t.Fatalf("unexpected non-running delete request: %d %s", userID, gotTaskID)
+			}
+			return true, nil
+		},
+	}
+	tasks.createFn = func(req service.CreateQueuedTaskRequest) (service.Task, error) {
+		return service.Task{
+			TaskID:         req.TaskID,
+			ChatID:         req.ChatID,
+			UserID:         req.UserID,
+			URL:            req.URL,
+			Status:         service.StatusQueued,
+			CreatedAt:      time.Now().UTC(),
+			IdempotencyKey: req.IdempotencyKey,
+		}, nil
+	}
+
+	h := Handler{Tasks: tasks, Queue: q}
+	outcome, err := h.HandleCallback(context.Background(), 1, "cb-1", callbackQueueRetryPrefix+encodeModeTask(taskMenuModeQueue, taskID))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(outcome.Reply, "任务已替换并重新入队") {
+		t.Fatalf("unexpected paused retry reply: %s", outcome.Reply)
+	}
+	if deleteCalls != 1 {
+		t.Fatalf("expected one non-running delete before retry, got %d", deleteCalls)
+	}
+	if len(q.messages) != 1 {
+		t.Fatalf("expected one enqueue after paused retry, got %d", len(q.messages))
+	}
+}
+
+func TestHandleCallbackRetryFromQueueQueuedReplacesTask(t *testing.T) {
+	const taskID = "task-queued"
+	q := &fakeQueue{}
+	deleteCalls := 0
+	tasks := &fakeTaskQuery{
+		task: service.Task{
+			TaskID:         taskID,
+			ChatID:         1,
+			UserID:         1,
+			URL:            "https://t.me/c/1/2",
+			Status:         service.StatusQueued,
+			IdempotencyKey: "idem-queued",
+		},
+		queueTasks: []service.Task{{TaskID: "other-task", UserID: 1, Status: service.StatusPaused, URL: "https://t.me/c/1/3"}},
+		deletePendingFn: func(userID int64, gotTaskID string) (bool, error) {
+			deleteCalls++
+			if userID != 1 || gotTaskID != taskID {
+				t.Fatalf("unexpected pending delete request: %d %s", userID, gotTaskID)
+			}
+			return true, nil
+		},
+	}
+	tasks.createFn = func(req service.CreateQueuedTaskRequest) (service.Task, error) {
+		return service.Task{
+			TaskID:         req.TaskID,
+			ChatID:         req.ChatID,
+			UserID:         req.UserID,
+			URL:            req.URL,
+			Status:         service.StatusQueued,
+			CreatedAt:      time.Now().UTC(),
+			IdempotencyKey: req.IdempotencyKey,
+		}, nil
+	}
+
+	h := Handler{Tasks: tasks, Queue: q}
+	outcome, err := h.HandleCallback(context.Background(), 1, "cb-1", callbackQueueRetryPrefix+encodeModeTask(taskMenuModeQueue, taskID))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(outcome.Reply, "任务已替换并重新入队") {
+		t.Fatalf("unexpected queued retry reply: %s", outcome.Reply)
+	}
+	if deleteCalls != 1 {
+		t.Fatalf("expected one pending delete before retry, got %d", deleteCalls)
+	}
+	if len(q.messages) != 1 {
+		t.Fatalf("expected one enqueue after queued retry, got %d", len(q.messages))
 	}
 }
 

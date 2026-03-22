@@ -78,7 +78,7 @@ func BuildCommandReply(cmd ParsedCommand) string {
 	case CommandDelete:
 		return "用法: /delete [task_id] [-f|--force]\n不带 task_id 时会显示可删除任务按钮菜单。"
 	case CommandRetry:
-		return "用法: /retry [task_id]\n不带 task_id 时会显示可重试任务按钮菜单。"
+		return "用法: /retry [task_id]\n不带 task_id 时会显示可重试任务按钮菜单；重试会替换旧任务记录并新建任务。"
 	default:
 		return ""
 	}
@@ -396,7 +396,7 @@ func (h Handler) buildTaskMenuOutcome(ctx context.Context, userID int64, mode ta
 	}
 
 	return HandleCallbackOutcome{
-		Reply:       formatQueueTaskDetail(task),
+		Reply:       formatTaskMenuDetail(task, mode),
 		ReplyMarkup: buildTaskActionKeyboard(task, mode),
 		AnswerText:  answerText,
 	}, nil
@@ -453,13 +453,13 @@ func (h Handler) openRetryTaskOutcome(ctx context.Context, userID int64, taskID 
 		}
 		return HandleTextOutcome{}, err
 	}
-	if !isRebuildableStatus(task.Status) {
+	if !canRetryTaskStatus(task.Status) {
 		return HandleTextOutcome{
 			Reply: fmt.Sprintf("任务当前状态不支持重试: %s\n\n%s", task.Status, formatQueueTaskDetail(task)),
 		}, nil
 	}
 	return HandleTextOutcome{
-		Reply:       formatQueueTaskDetail(task),
+		Reply:       formatRetryTaskDetail(task),
 		ReplyMarkup: buildTaskActionKeyboard(task, taskMenuModeRetry),
 	}, nil
 }
@@ -568,10 +568,18 @@ func (h Handler) createTaskFromRequest(ctx context.Context, userID, chatID int64
 		h.logInfo("bot task existing hit",
 			"task_id", task.TaskID,
 			"status", task.Status,
-			"rebuild", isRebuildableStatus(task.Status),
+			"rebuild", isFailedRetryStatus(task.Status),
 			"idempotency_key_prefix", idempotencyKeyPrefix(idempotencyKey),
 		)
-		if isRebuildableStatus(task.Status) {
+		if isFailedRetryStatus(task.Status) {
+			if err := h.removeTaskBeforeRetry(ctx, task); err != nil {
+				h.logError("bot task rebuild cleanup failed",
+					"task_id", task.TaskID,
+					"status", task.Status,
+					"error", err,
+				)
+				return HandleTextOutcome{Reply: fmt.Sprintf("任务重建失败\nTask ID: %s", task.TaskID), ReactionEmoji: statusReaction(task.Status)}, nil
+			}
 			return h.rebuildTaskFromRequest(ctx, req, task)
 		}
 		return HandleTextOutcome{
@@ -679,7 +687,7 @@ func (h Handler) retryTaskByTaskID(ctx context.Context, userID int64, taskID str
 	if task.UserID != userID {
 		return HandleTextOutcome{Reply: "无权限重试该任务。"}, nil
 	}
-	if !isRebuildableStatus(task.Status) {
+	if !canRetryTaskStatus(task.Status) {
 		return HandleTextOutcome{
 			Reply:         fmt.Sprintf("任务当前状态不支持重试: %s", task.Status),
 			ReactionEmoji: statusReaction(task.Status),
@@ -695,19 +703,28 @@ func (h Handler) retryTaskByTaskID(ctx context.Context, userID int64, taskID str
 		DropCaption:    task.DropCaption,
 		IdempotencyKey: task.IdempotencyKey,
 	}
-	return h.rebuildTaskFromRequest(ctx, req, task)
+	if err := h.removeTaskBeforeRetry(ctx, task); err != nil {
+		h.logError("bot task retry cleanup failed",
+			"task_id", task.TaskID,
+			"status", task.Status,
+			"error", err,
+		)
+		return HandleTextOutcome{
+			Reply:         fmt.Sprintf("任务状态已变化，请刷新 /queue。\nTask ID: %s", task.TaskID),
+			ReactionEmoji: statusReaction(task.Status),
+		}, nil
+	}
+	outcome, err := h.rebuildTaskFromRequest(ctx, req, task)
+	if err != nil {
+		return HandleTextOutcome{}, err
+	}
+	if strings.TrimSpace(outcome.TaskID) != "" {
+		outcome.Reply = formatRetryReplacedReply(task, outcome.TaskID)
+	}
+	return outcome, nil
 }
 
 func (h Handler) rebuildTaskFromRequest(ctx context.Context, req service.CreateQueuedTaskRequest, existing service.Task) (HandleTextOutcome, error) {
-	if _, err := h.Tasks.DeleteFailedByIdempotencyKey(ctx, req.IdempotencyKey); err != nil {
-		h.logError("bot task rebuild cleanup failed",
-			"task_id", existing.TaskID,
-			"status", existing.Status,
-			"error", err,
-		)
-		return HandleTextOutcome{Reply: fmt.Sprintf("任务重建失败\nTask ID: %s", existing.TaskID), ReactionEmoji: statusReaction(existing.Status)}, nil
-	}
-
 	rebuildTaskID := req.TaskID
 	task, err := h.Tasks.CreateQueuedTask(ctx, req)
 	if err != nil {
@@ -740,6 +757,43 @@ func (h Handler) rebuildTaskFromRequest(ctx context.Context, req service.CreateQ
 		ReactionEmoji: statusReaction(task.Status),
 		TaskID:        task.TaskID,
 	}, nil
+}
+
+func (h Handler) removeTaskBeforeRetry(ctx context.Context, task service.Task) error {
+	switch task.Status {
+	case service.StatusFailed, service.StatusDeadLettered:
+		_, err := h.Tasks.DeleteFailedByIdempotencyKey(ctx, task.IdempotencyKey)
+		return err
+	case service.StatusQueued, service.StatusRetrying:
+		deleted, err := h.Tasks.DeletePendingTask(ctx, task.UserID, task.TaskID)
+		if err != nil {
+			return err
+		}
+		if !deleted {
+			return errors.New("bot: queued task changed before retry")
+		}
+		return nil
+	case service.StatusPaused:
+		deleted, err := h.Tasks.DeleteTaskNonRunning(ctx, task.UserID, task.TaskID)
+		if err != nil {
+			return err
+		}
+		if !deleted {
+			return errors.New("bot: paused task changed before retry")
+		}
+		return nil
+	case service.StatusRunning:
+		deleted, err := h.Tasks.ForceDeleteTask(ctx, task.UserID, task.TaskID)
+		if err != nil {
+			return err
+		}
+		if !deleted {
+			return errors.New("bot: running task changed before retry")
+		}
+		return nil
+	default:
+		return errors.New("bot: unsupported retry status")
+	}
 }
 
 func (h Handler) BindTaskMessageRefs(ctx context.Context, taskID string, sourceMessageID, statusMessageID int64) (service.Task, error) {
@@ -822,8 +876,17 @@ func redactURL(raw string) string {
 	return fmt.Sprintf("%s://%s%s", u.Scheme, u.Host, path)
 }
 
-func isRebuildableStatus(status service.Status) bool {
+func isFailedRetryStatus(status service.Status) bool {
 	return status == service.StatusFailed || status == service.StatusDeadLettered
+}
+
+func canRetryTaskStatus(status service.Status) bool {
+	switch status {
+	case service.StatusRunning, service.StatusQueued, service.StatusRetrying, service.StatusPaused, service.StatusFailed, service.StatusDeadLettered:
+		return true
+	default:
+		return false
+	}
 }
 
 func statusReaction(status service.Status) string {
@@ -903,13 +966,22 @@ func buildForceDeleteConfirmKeyboard(mode taskMenuMode, taskID string) *telegram
 }
 
 func buildTaskActionKeyboard(task service.Task, mode taskMenuMode) *telegram.InlineKeyboardMarkup {
-	rows := make([][]telegram.InlineKeyboardButton, 0, 3)
+	rows := make([][]telegram.InlineKeyboardButton, 0, 4)
+	allowRetry := mode != taskMenuModeDelete && canRetryTaskStatus(task.Status)
 	switch task.Status {
 	case service.StatusRunning:
-		rows = append(rows, []telegram.InlineKeyboardButton{
-			{Text: "强制删除", CallbackData: callbackQueueForcePrefix + encodeModeTask(mode, task.TaskID)},
-		})
+		row := make([]telegram.InlineKeyboardButton, 0, 2)
+		if allowRetry {
+			row = append(row, telegram.InlineKeyboardButton{Text: "重试", CallbackData: callbackQueueRetryPrefix + encodeModeTask(mode, task.TaskID)})
+		}
+		row = append(row, telegram.InlineKeyboardButton{Text: "强制删除", CallbackData: callbackQueueForcePrefix + encodeModeTask(mode, task.TaskID)})
+		rows = append(rows, row)
 	case service.StatusQueued, service.StatusRetrying:
+		if allowRetry {
+			rows = append(rows, []telegram.InlineKeyboardButton{
+				{Text: "重试", CallbackData: callbackQueueRetryPrefix + encodeModeTask(mode, task.TaskID)},
+			})
+		}
 		rows = append(rows, []telegram.InlineKeyboardButton{
 			{Text: "暂停", CallbackData: callbackQueuePausePrefix + encodeModeTask(mode, task.TaskID)},
 			{Text: "取消", CallbackData: callbackQueueCancelPrefix + encodeModeTask(mode, task.TaskID)},
@@ -918,6 +990,11 @@ func buildTaskActionKeyboard(task service.Task, mode taskMenuMode) *telegram.Inl
 			{Text: "删除", CallbackData: callbackDeletePrefix + encodeModeTask(mode, task.TaskID)},
 		})
 	case service.StatusPaused:
+		if allowRetry {
+			rows = append(rows, []telegram.InlineKeyboardButton{
+				{Text: "重试", CallbackData: callbackQueueRetryPrefix + encodeModeTask(mode, task.TaskID)},
+			})
+		}
 		rows = append(rows, []telegram.InlineKeyboardButton{
 			{Text: "继续", CallbackData: callbackQueueResumePrefix + encodeModeTask(mode, task.TaskID)},
 			{Text: "取消", CallbackData: callbackQueueCancelPrefix + encodeModeTask(mode, task.TaskID)},
@@ -926,10 +1003,16 @@ func buildTaskActionKeyboard(task service.Task, mode taskMenuMode) *telegram.Inl
 			{Text: "删除", CallbackData: callbackDeletePrefix + encodeModeTask(mode, task.TaskID)},
 		})
 	case service.StatusFailed, service.StatusDeadLettered:
-		rows = append(rows, []telegram.InlineKeyboardButton{
-			{Text: "重试", CallbackData: callbackQueueRetryPrefix + encodeModeTask(mode, task.TaskID)},
-			{Text: "删除", CallbackData: callbackDeletePrefix + encodeModeTask(mode, task.TaskID)},
-		})
+		if allowRetry {
+			rows = append(rows, []telegram.InlineKeyboardButton{
+				{Text: "重试", CallbackData: callbackQueueRetryPrefix + encodeModeTask(mode, task.TaskID)},
+				{Text: "删除", CallbackData: callbackDeletePrefix + encodeModeTask(mode, task.TaskID)},
+			})
+		} else {
+			rows = append(rows, []telegram.InlineKeyboardButton{
+				{Text: "删除", CallbackData: callbackDeletePrefix + encodeModeTask(mode, task.TaskID)},
+			})
+		}
 	}
 	rows = append(rows, []telegram.InlineKeyboardButton{
 		{Text: taskBackLabel(mode), CallbackData: taskBackCallbackPrefix(mode) + string(mode)},
@@ -1084,7 +1167,7 @@ func filterTasksForMode(tasks []service.Task, mode taskMenuMode) []service.Task 
 	for _, task := range tasks {
 		switch mode {
 		case taskMenuModeRetry:
-			if isRebuildableStatus(task.Status) {
+			if canRetryTaskStatus(task.Status) {
 				filtered = append(filtered, task)
 			}
 		case taskMenuModeDelete, taskMenuModeQueue:
@@ -1132,6 +1215,38 @@ func formatForceDeletePrompt(task service.Task) string {
 	}
 	if task.Status == service.StatusRunning {
 		lines = append(lines, "这只会删除记录，不会终止当前执行。")
+	}
+	return strings.Join(lines, "\n")
+}
+
+func formatRetryTaskDetail(task service.Task) string {
+	lines := []string{formatQueueTaskDetail(task)}
+	switch task.Status {
+	case service.StatusRunning:
+		lines = append(lines, "重试会替换当前记录并新建任务，但不会停止旧的实际执行。")
+	case service.StatusQueued, service.StatusRetrying, service.StatusPaused:
+		lines = append(lines, "重试会删除当前记录并新建任务。")
+	case service.StatusFailed, service.StatusDeadLettered:
+		lines = append(lines, "重试会清理失败记录并新建任务。")
+	}
+	return strings.Join(lines, "\n")
+}
+
+func formatTaskMenuDetail(task service.Task, mode taskMenuMode) string {
+	if mode == taskMenuModeDelete {
+		return formatQueueTaskDetail(task)
+	}
+	return formatRetryTaskDetail(task)
+}
+
+func formatRetryReplacedReply(existing service.Task, newTaskID string) string {
+	lines := []string{
+		"任务已替换并重新入队",
+		fmt.Sprintf("旧 Task ID: %s", existing.TaskID),
+		fmt.Sprintf("新 Task ID: %s", newTaskID),
+	}
+	if existing.Status == service.StatusRunning {
+		lines = append(lines, "旧任务可能仍在实际执行，本次重试不会终止它。")
 	}
 	return strings.Join(lines, "\n")
 }
