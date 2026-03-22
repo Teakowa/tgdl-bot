@@ -10,12 +10,15 @@ Used by the bot service to:
 
 - receive updates via webhook or `getUpdates`
 - reply to users (with `reply_to_message_id` to quote the original message)
-- send task completion or failure notifications
+- sync task status messages and source message reactions
 - manage webhook lifecycle via `setWebhook` and `deleteWebhook`
 
 ### Cloudflare Queues HTTP API
 
-Used by the bot service to enqueue tasks and by the downloader service to pull tasks.
+Used by both services with two queues:
+
+- task queue (`CF_QUEUE_ID`): bot enqueues tasks, downloader pulls tasks
+- status queue (`CF_STATUS_QUEUE_ID`): downloader publishes task status events, bot pulls status events
 
 ### Cloudflare D1 API
 
@@ -27,7 +30,7 @@ Used by the downloader service to perform message forward work.
 
 ## Internal data contracts
 
-### Queue message
+### Task queue message (`CF_QUEUE_ID`)
 
 ```json
 {
@@ -41,6 +44,20 @@ Used by the downloader service to perform message forward work.
 
 - `target_chat_id` is optional.
 - If `target_chat_id` is omitted (or persisted as `0`), downloader will not pass `--to` and `tdl forward` defaults to `Saved Messages`.
+
+### Status queue message (`CF_STATUS_QUEUE_ID`)
+
+```json
+{
+  "task_id": "uuid",
+  "status": "running",
+  "retry_count": 1,
+  "updated_at": "2026-03-21T00:00:00Z"
+}
+```
+
+- Bot does not trust status queue payload as source of truth.
+- Bot always re-reads the task from D1 by `task_id` before updating Telegram messages.
 
 ### Task entity
 
@@ -78,9 +95,11 @@ Used by the downloader service to perform message forward work.
 - Polling mode auto-recovers Telegram webhook conflicts (`error_code=409`) by reissuing `deleteWebhook`.
 - Webhook requests are accepted only via `POST` and validated with `X-Telegram-Bot-Api-Secret-Token`.
 - Bot persists a queued forward task in D1 before enqueueing to Cloudflare Queue.
+- Bot consumes status queue messages, fetches the latest task state from D1, and updates Telegram status/reaction.
 - Downloader performs session preflight before pulling tasks.
 - Downloader atomically claims task ownership (`queued`/`retrying` -> `running`) before execution.
 - Downloader startup re-enqueues failed/dead-lettered tasks still below retry cap.
+- Downloader publishes status events to `CF_STATUS_QUEUE_ID` after each persisted state transition.
 - Downloader uses `exec.CommandContext` for `tdl`.
 - Downloader captures stdout, stderr, exit code, and timeout behavior.
 - Timeout tasks (default 3 hours) are marked `failed` and acked instead of retried.

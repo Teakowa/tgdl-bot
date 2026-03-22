@@ -10,9 +10,18 @@ import (
 	"strings"
 	"time"
 
+	"tgdl-bot/internal/queue"
+	"tgdl-bot/internal/service"
+	"tgdl-bot/internal/taskevent"
 	"tgdl-bot/internal/tasknotify"
 	"tgdl-bot/internal/telegram"
 )
+
+type statusQueueConsumer interface {
+	Pull(ctx context.Context, batchSize, visibilityTimeoutMs int) ([]queue.ReceivedMessage, error)
+	Ack(ctx context.Context, leaseIDs []string) error
+	Retry(ctx context.Context, leaseIDs []string) error
+}
 
 type Runtime struct {
 	Client         telegram.Client
@@ -25,16 +34,44 @@ type Runtime struct {
 	WebhookURL     string
 	WebhookSecret  string
 	WebhookAddr    string
+
+	StatusQueue               statusQueueConsumer
+	StatusQueueBatchSize      int
+	StatusQueuePullInterval   time.Duration
+	StatusQueueVisibilityMs   int
+	StatusNotificationTimeout time.Duration
 }
 
 func (r Runtime) Run(ctx context.Context) error {
 	if r.Client == nil {
 		return errors.New("bot runtime: telegram client is required")
 	}
-	if r.useWebhookMode() {
-		return r.runWebhook(ctx)
+	if !r.statusSyncEnabled() {
+		if r.useWebhookMode() {
+			return r.runWebhook(ctx)
+		}
+		return r.runPolling(ctx)
 	}
-	return r.runPolling(ctx)
+
+	runCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	errCh := make(chan error, 2)
+	go func() {
+		errCh <- r.runStatusSync(runCtx)
+	}()
+	go func() {
+		if r.useWebhookMode() {
+			errCh <- r.runWebhook(runCtx)
+			return
+		}
+		errCh <- r.runPolling(runCtx)
+	}()
+
+	firstErr := <-errCh
+	cancel()
+	secondErr := <-errCh
+	return chooseRunError(firstErr, secondErr)
 }
 
 func (r Runtime) runPolling(ctx context.Context) error {
@@ -191,6 +228,133 @@ func (r Runtime) processUpdate(ctx context.Context, update telegram.Update) {
 
 func (r Runtime) useWebhookMode() bool {
 	return r.UseWebhook && strings.TrimSpace(r.WebhookURL) != ""
+}
+
+func (r Runtime) statusSyncEnabled() bool {
+	return r.StatusQueue != nil && r.Handler.Tasks != nil
+}
+
+func (r Runtime) runStatusSync(ctx context.Context) error {
+	pullInterval := r.StatusQueuePullInterval
+	if pullInterval <= 0 {
+		pullInterval = 1200 * time.Millisecond
+	}
+	batchSize := r.StatusQueueBatchSize
+	if batchSize <= 0 {
+		batchSize = 5
+	}
+	visibilityTimeout := r.StatusQueueVisibilityMs
+	if visibilityTimeout <= 0 {
+		visibilityTimeout = 15 * 60 * 1000
+	}
+
+	r.log("status sync loop started", "batch_size", batchSize, "visibility_timeout_ms", visibilityTimeout)
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+
+		messages, err := r.StatusQueue.Pull(ctx, batchSize, visibilityTimeout)
+		if err != nil {
+			r.log("status sync queue pull failed", "error", err)
+			time.Sleep(pullInterval)
+			continue
+		}
+		if len(messages) == 0 {
+			time.Sleep(pullInterval)
+			continue
+		}
+		for _, message := range messages {
+			r.processStatusMessage(ctx, message)
+		}
+	}
+}
+
+func (r Runtime) processStatusMessage(ctx context.Context, message queue.ReceivedMessage) {
+	if message.LeaseID == "" {
+		return
+	}
+
+	event, ok := taskevent.FromQueueMessage(message.Body)
+	if !ok {
+		r.log("status sync invalid message acked", "lease_id", message.LeaseID)
+		_ = r.StatusQueue.Ack(ctx, []string{message.LeaseID})
+		return
+	}
+
+	task, err := r.Handler.Tasks.GetTask(ctx, event.TaskID)
+	if err != nil {
+		if errors.Is(err, service.ErrTaskNotFound) {
+			r.log("status sync task not found acked", "lease_id", message.LeaseID, "task_id", event.TaskID)
+			_ = r.StatusQueue.Ack(ctx, []string{message.LeaseID})
+			return
+		}
+		r.log("status sync task load failed, lease retried", "lease_id", message.LeaseID, "task_id", event.TaskID, "error", err)
+		_ = r.StatusQueue.Retry(ctx, []string{message.LeaseID})
+		return
+	}
+
+	if task.StatusMessageID == nil && task.SourceMessageID == nil {
+		r.log("status sync task message refs missing, lease retried", "lease_id", message.LeaseID, "task_id", event.TaskID)
+		_ = r.StatusQueue.Retry(ctx, []string{message.LeaseID})
+		return
+	}
+
+	notifier := tasknotify.Notifier{Client: r.Client, Logger: r.Logger}
+	timeout := r.StatusNotificationTimeout
+	if timeout <= 0 {
+		timeout = 8 * time.Second
+	}
+	notifyCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	if err := notifier.Notify(notifyCtx, task); err != nil {
+		if shouldRetryStatusNotify(err) {
+			r.log("status sync notify failed, lease retried", "lease_id", message.LeaseID, "task_id", event.TaskID, "error", err)
+			_ = r.StatusQueue.Retry(ctx, []string{message.LeaseID})
+			return
+		}
+		r.log("status sync notify failed, lease acked", "lease_id", message.LeaseID, "task_id", event.TaskID, "error", err)
+		_ = r.StatusQueue.Ack(ctx, []string{message.LeaseID})
+		return
+	}
+
+	_ = r.StatusQueue.Ack(ctx, []string{message.LeaseID})
+}
+
+func shouldRetryStatusNotify(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return true
+	}
+
+	var apiErr *telegram.APIRequestError
+	if errors.As(err, &apiErr) {
+		if apiErr.Code == 429 {
+			return true
+		}
+		return apiErr.Code >= 500
+	}
+	return true
+}
+
+func chooseRunError(firstErr, secondErr error) error {
+	for _, candidate := range []error{firstErr, secondErr} {
+		if candidate == nil {
+			continue
+		}
+		if errors.Is(candidate, context.Canceled) || errors.Is(candidate, context.DeadlineExceeded) {
+			continue
+		}
+		return candidate
+	}
+	if firstErr != nil {
+		return firstErr
+	}
+	return secondErr
 }
 
 func (r Runtime) bindAndSyncTaskStatus(ctx context.Context, outcome *UpdateOutcome, sentMessage telegram.Message) {

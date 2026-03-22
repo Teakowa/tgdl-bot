@@ -46,6 +46,7 @@ type CloudflareConfig struct {
 	AccountID                string
 	D1DatabaseID             string
 	QueueID                  string
+	StatusQueueID            string
 	APIToken                 string
 	QueueBatchSize           int
 	QueueVisibilityTimeoutMS int
@@ -63,6 +64,25 @@ type DownloaderConfig struct {
 }
 
 func Load() (Config, error) {
+	return LoadForBot()
+}
+
+func LoadForBot() (Config, error) {
+	return load(loadTargetBot)
+}
+
+func LoadForDownloader() (Config, error) {
+	return load(loadTargetDownloader)
+}
+
+type loadTarget int
+
+const (
+	loadTargetBot loadTarget = iota + 1
+	loadTargetDownloader
+)
+
+func load(target loadTarget) (Config, error) {
 	_ = loadDotEnv(".env")
 
 	cfg := Config{
@@ -80,6 +100,7 @@ func Load() (Config, error) {
 			AccountID:                strings.TrimSpace(os.Getenv("CF_ACCOUNT_ID")),
 			D1DatabaseID:             strings.TrimSpace(os.Getenv("CF_D1_DATABASE_ID")),
 			QueueID:                  strings.TrimSpace(os.Getenv("CF_QUEUE_ID")),
+			StatusQueueID:            strings.TrimSpace(os.Getenv("CF_STATUS_QUEUE_ID")),
 			APIToken:                 strings.TrimSpace(os.Getenv("CF_API_TOKEN")),
 			QueueBatchSize:           getIntEnv("CF_QUEUE_BATCH_SIZE", defaultCloudflareQueueBatchSize),
 			QueueVisibilityTimeoutMS: getIntEnv("CF_QUEUE_VISIBILITY_TIMEOUT_MS", defaultQueueVisibilityTimeoutMS),
@@ -99,11 +120,17 @@ func Load() (Config, error) {
 	cfg.Telegram.AllowedUserIDs = parseInt64List(os.Getenv("TELEGRAM_ALLOWED_USER_IDS"))
 
 	var errs []error
-	validateRequired(&errs, "TELEGRAM_BOT_TOKEN", cfg.Telegram.BotToken)
+	if target == loadTargetBot {
+		validateRequired(&errs, "TELEGRAM_BOT_TOKEN", cfg.Telegram.BotToken)
+	}
 	validateRequired(&errs, "CF_ACCOUNT_ID", cfg.Cloudflare.AccountID)
 	validateRequired(&errs, "CF_D1_DATABASE_ID", cfg.Cloudflare.D1DatabaseID)
 	validateRequired(&errs, "CF_QUEUE_ID", cfg.Cloudflare.QueueID)
+	validateRequired(&errs, "CF_STATUS_QUEUE_ID", cfg.Cloudflare.StatusQueueID)
 	validateRequired(&errs, "CF_API_TOKEN", cfg.Cloudflare.APIToken)
+	if cfg.Cloudflare.QueueID != "" && cfg.Cloudflare.StatusQueueID != "" && cfg.Cloudflare.QueueID == cfg.Cloudflare.StatusQueueID {
+		errs = append(errs, fmt.Errorf("CF_STATUS_QUEUE_ID must be different from CF_QUEUE_ID"))
+	}
 
 	webhookMode := cfg.Telegram.UseWebhook && cfg.Telegram.WebhookURL != ""
 	if webhookMode && cfg.Telegram.WebhookSecret == "" {

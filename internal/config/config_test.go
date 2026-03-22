@@ -67,6 +67,33 @@ func TestLoadRequiresD1DatabaseID(t *testing.T) {
 	}
 }
 
+func TestLoadForDownloaderDoesNotRequireTelegramToken(t *testing.T) {
+	setBaseEnv(t)
+	t.Setenv("TELEGRAM_BOT_TOKEN", "")
+
+	cfg, err := LoadForDownloader()
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if cfg.Telegram.BotToken != "" {
+		t.Fatalf("expected empty bot token, got %q", cfg.Telegram.BotToken)
+	}
+}
+
+func TestLoadRequiresDifferentStatusQueueID(t *testing.T) {
+	setBaseEnv(t)
+	t.Setenv("CF_QUEUE_ID", "same-queue")
+	t.Setenv("CF_STATUS_QUEUE_ID", "same-queue")
+
+	_, err := Load()
+	if err == nil {
+		t.Fatal("expected validation error")
+	}
+	if !strings.Contains(err.Error(), "CF_STATUS_QUEUE_ID must be different from CF_QUEUE_ID") {
+		t.Fatalf("expected queue id mismatch error, got %v", err)
+	}
+}
+
 func setBaseEnv(t *testing.T) {
 	t.Helper()
 	t.Setenv("TELEGRAM_BOT_TOKEN", "token")
@@ -79,6 +106,7 @@ func setBaseEnv(t *testing.T) {
 	t.Setenv("CF_ACCOUNT_ID", "account")
 	t.Setenv("CF_D1_DATABASE_ID", "d1-db-id")
 	t.Setenv("CF_QUEUE_ID", "queue")
+	t.Setenv("CF_STATUS_QUEUE_ID", "status-queue")
 	t.Setenv("CF_API_TOKEN", "api-token")
 	t.Setenv("CF_QUEUE_BATCH_SIZE", "5")
 	t.Setenv("CF_QUEUE_VISIBILITY_TIMEOUT_MS", "900000")

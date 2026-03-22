@@ -13,8 +13,8 @@ Go-based Telegram message forwarding bot and downloader scaffold for the phase 1
 
 - Go 1.24+
 - `tdl` installed and available on `PATH`
-- Telegram bot token
-- Cloudflare Queue credentials
+- Telegram bot token (bot service only)
+- Cloudflare Queue credentials (task queue + status queue)
 - Cloudflare D1 database ID
 - Cloudflare API token with Queue + D1 permissions
 
@@ -65,6 +65,7 @@ Make sure `tdl login` has been completed first, then start the downloader:
 
 The downloader performs a session preflight check before it begins consuming the queue.
 The execution model is: `message URL -> queue -> tdl forward`.
+Downloader does not call Telegram Bot API directly.
 On startup, downloader also re-enqueues historical failed/dead-lettered tasks that are still below the retry cap.
 
 ## Docker compose
@@ -102,7 +103,11 @@ For full commands (`build`/`pull`/`up`), `tdl login` bootstrap, and scaling exam
 
 - Bot and downloader can run on the same machine or separately.
 - Task state is stored in D1; both services must point to the same `CF_D1_DATABASE_ID`.
+- `CF_QUEUE_ID` is the task queue (`bot -> downloader`).
+- `CF_STATUS_QUEUE_ID` is the status queue (`downloader -> bot`) and must be different from `CF_QUEUE_ID`.
 - Downloader must not consume tasks until `tdl` session preflight succeeds.
+- Downloader writes task state to D1 and emits status events to `CF_STATUS_QUEUE_ID`.
+- Bot consumes `CF_STATUS_QUEUE_ID`, refreshes task state from D1, and updates Telegram status/reaction.
 - Task execution timeout defaults to 3 hours (`TASK_TIMEOUT_MINUTES=180`); timeout tasks are marked failed and removed from queue.
 - This phase does not include a web UI, object storage, or worker-based deployment.
 - Bot accepts Telegram message URLs only and creates forward tasks.

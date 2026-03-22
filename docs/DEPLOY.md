@@ -24,6 +24,10 @@ cp .env.example .env
 ```
 
 Fill `.env` with Telegram and Cloudflare credentials.
+Set both queue IDs and keep them different:
+
+- `CF_QUEUE_ID` for task queue (`bot -> downloader`)
+- `CF_STATUS_QUEUE_ID` for status queue (`downloader -> bot`)
 
 ### 2. Configure tags for `prod` in `.env`
 
@@ -121,4 +125,6 @@ docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.build.yml c
 - Downloader performs startup preflight before queue consumption and requires a ready `tdl` session when login checks are enabled.
 - `tdl` session state is persisted in `tgdl-tdl-session` mounted at `/root/.tdl`.
 - Compose in this phase uses external Cloudflare Queue + D1 APIs; no local DB container is part of this deployment model.
+- Downloader does not need Telegram bot token; it publishes task status updates to `CF_STATUS_QUEUE_ID`.
+- Bot consumes `CF_STATUS_QUEUE_ID`, refreshes task state from D1, then syncs Telegram task status/reaction.
 - Keep `TDL_NAMESPACE` aligned with the namespace used in `tdl login`.

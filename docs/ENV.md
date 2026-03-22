@@ -4,7 +4,7 @@ All configuration is read from environment variables.
 
 ## Telegram
 
-- `TELEGRAM_BOT_TOKEN`: required bot token
+- `TELEGRAM_BOT_TOKEN`: required for bot service, not required for downloader service
 - `TELEGRAM_API_BASE`: optional API base URL, defaults to the official Telegram API
 - `TELEGRAM_USE_WEBHOOK`: optional boolean, defaults to `false`
 - `TELEGRAM_WEBHOOK_URL`: optional webhook URL. Bot enters webhook mode only when this value is set and `TELEGRAM_USE_WEBHOOK=true`; otherwise it falls back to long polling.
@@ -16,7 +16,8 @@ All configuration is read from environment variables.
 
 - `CF_ACCOUNT_ID`: required Cloudflare account ID
 - `CF_D1_DATABASE_ID`: required Cloudflare D1 database ID
-- `CF_QUEUE_ID`: required Cloudflare queue ID
+- `CF_QUEUE_ID`: required task queue ID (`bot -> downloader`)
+- `CF_STATUS_QUEUE_ID`: required status queue ID (`downloader -> bot`), must differ from `CF_QUEUE_ID`
 - `CF_API_TOKEN`: required Cloudflare API token (must include Queue + D1 permissions)
 - `CF_QUEUE_BATCH_SIZE`: optional batch size, defaults to `5`
 - `CF_QUEUE_VISIBILITY_TIMEOUT_MS`: optional visibility timeout in milliseconds, defaults to `900000`
@@ -50,6 +51,8 @@ The phase 1 scaffold assumes:
 - polling mode deletes outgoing webhook (`drop_pending_updates=false`) before reading updates
 - polling conflict recovery automatically retries after deleting webhook on Telegram API conflict (`error_code=409`)
 - D1 is the single task store for bot and downloader
+- `CF_QUEUE_ID` and `CF_STATUS_QUEUE_ID` are split by direction and cannot be shared
+- downloader publishes status events to `CF_STATUS_QUEUE_ID`; bot consumes and syncs Telegram status from D1
 - one `tdl` namespace per downloader deployment
 - no interactive login at runtime
 - forward target defaults to sender context

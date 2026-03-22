@@ -25,6 +25,9 @@ type Message struct {
 	URL          string    `json:"url"`
 	CreatedAt    time.Time `json:"created_at"`
 	Idempotency  string    `json:"idempotency_key,omitempty"`
+	Status       string    `json:"status,omitempty"`
+	UpdatedAt    time.Time `json:"updated_at,omitempty"`
+	RetryCount   int       `json:"retry_count,omitempty"`
 }
 
 type ReceivedMessage struct {

@@ -7,6 +7,7 @@ Phase 1 forwarding scope for TGDL Bot.
 - Telegram bot entrypoint for URL intake and forward task enqueueing
 - Downloader entrypoint for queue consumption and `tdl` forward execution
 - D1-backed task persistence shared by bot and downloader
+- Dedicated status queue for downloader-to-bot task status synchronization
 - Basic idempotency and duplicate protection
 - Session preflight before downloader starts consuming tasks
 - Safe parallel downloader execution via atomic task claim
@@ -66,8 +67,17 @@ Phase 1 forwarding scope for TGDL Bot.
 4. If claim fails, ack the message because another downloader already owns it
 5. Execute `tdl` forward
 6. Persist result
-7. Ack success or retry/fail according to error type
-8. On service startup, re-enqueue failed/dead-lettered tasks that still have retry budget
+7. Publish status event to status queue after each persisted state transition
+8. Ack success or retry/fail according to error type
+9. On service startup, re-enqueue failed/dead-lettered tasks that still have retry budget
+
+### Bot status sync
+
+1. Pull status events from status queue
+2. Load current task state from D1 by `task_id`
+3. If task message references are not ready, retry status event lease
+4. Update Telegram status message and source reaction from D1 task state
+5. Ack on success, retry on transient notify/load errors, ack on non-recoverable errors
 
 ## `tdl` invocation requirements
 
@@ -89,3 +99,4 @@ Run `tdl login` on each downloader host before starting downloader service on th
 - Bot does not expose interactive login or arbitrary destination forwarding in this phase.
 - Bot prefers webhook mode when configured, and otherwise falls back to long polling.
 - Polling mode deletes outgoing webhook before `getUpdates` to satisfy Telegram API mutual exclusion.
+- Queue split is required: `CF_QUEUE_ID` (task queue) and `CF_STATUS_QUEUE_ID` (status queue) must be different values.

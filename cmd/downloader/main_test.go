@@ -48,13 +48,17 @@ func TestRun_PreflightFailureSkipsLoop(t *testing.T) {
 }
 
 type fakeQueue struct {
-	acked    []string
-	retried  []string
-	enqueued []queue.Message
+	acked      []string
+	retried    []string
+	enqueued   []queue.Message
+	enqueueErr error
 }
 
 func (q *fakeQueue) Pull(context.Context, int, int) ([]queue.ReceivedMessage, error) { return nil, nil }
 func (q *fakeQueue) Enqueue(_ context.Context, message queue.Message) error {
+	if q.enqueueErr != nil {
+		return q.enqueueErr
+	}
 	q.enqueued = append(q.enqueued, message)
 	return nil
 }
@@ -71,8 +75,6 @@ type fakeTasks struct {
 	task           service.Task
 	claimed        bool
 	claimErr       error
-	getTaskErr     error
-	getTaskFn      func(taskID string) (service.Task, error)
 	updates        []service.TaskUpdate
 	failedForRetry []service.Task
 }
@@ -125,28 +127,9 @@ func (f *fakeTasks) UpdateTask(_ context.Context, _ string, update service.TaskU
 func (f *fakeTasks) ListFailedTasksForRetry(context.Context, int, int) ([]service.Task, error) {
 	return f.failedForRetry, nil
 }
-func (f *fakeTasks) GetTask(_ context.Context, taskID string) (service.Task, error) {
-	if f.getTaskFn != nil {
-		return f.getTaskFn(taskID)
-	}
-	if f.getTaskErr != nil {
-		return service.Task{}, f.getTaskErr
-	}
-	return f.task, nil
-}
 
 type fakeRunnerImpl struct {
 	build func(context.Context, dl.DownloadRequest) (*exec.Cmd, error)
-}
-
-type fakeNotifier struct {
-	err   error
-	tasks []service.Task
-}
-
-func (f *fakeNotifier) Notify(_ context.Context, task service.Task) error {
-	f.tasks = append(f.tasks, task)
-	return f.err
 }
 
 func (f fakeRunnerImpl) Preflight(context.Context, dl.DownloadRequest) (dl.SessionState, error) {
@@ -159,7 +142,7 @@ func (f fakeRunnerImpl) BuildCommand(ctx context.Context, req dl.DownloadRequest
 
 func TestQueuePullLoopProcessMessageSuccessAcks(t *testing.T) {
 	q := &fakeQueue{}
-	notifier := &fakeNotifier{}
+	statusQueue := &fakeQueue{}
 	tasks := &fakeTasks{
 		claimed: true,
 		task: service.Task{
@@ -170,13 +153,13 @@ func TestQueuePullLoopProcessMessageSuccessAcks(t *testing.T) {
 		},
 	}
 	loop := queuePullLoop{
-		logger: slog.Default(),
-		queue:  q,
-		tasks:  tasks,
+		logger:      slog.Default(),
+		queue:       q,
+		statusQueue: statusQueue,
+		tasks:       tasks,
 		runner: fakeRunnerImpl{build: func(ctx context.Context, _ dl.DownloadRequest) (*exec.Cmd, error) {
 			return exec.CommandContext(ctx, "sh", "-c", "echo ok"), nil
 		}},
-		notifier:    notifier,
 		maxAttempts: 3,
 	}
 
@@ -191,19 +174,17 @@ func TestQueuePullLoopProcessMessageSuccessAcks(t *testing.T) {
 	if len(q.retried) != 0 {
 		t.Fatalf("expected no retries, got %+v", q.retried)
 	}
-	if len(notifier.tasks) < 2 {
-		t.Fatalf("expected running and done notifications, got %d", len(notifier.tasks))
+	if len(statusQueue.enqueued) < 2 {
+		t.Fatalf("expected running and done status events, got %d", len(statusQueue.enqueued))
 	}
-	if notifier.tasks[len(notifier.tasks)-1].Status != service.StatusDone {
-		t.Fatalf("expected done notification, got %s", notifier.tasks[len(notifier.tasks)-1].Status)
+	if statusQueue.enqueued[len(statusQueue.enqueued)-1].Status != string(service.StatusDone) {
+		t.Fatalf("expected done status event, got %s", statusQueue.enqueued[len(statusQueue.enqueued)-1].Status)
 	}
 }
 
-func TestQueuePullLoopProcessMessageSuccessRefreshesTaskBeforeFinalNotify(t *testing.T) {
+func TestQueuePullLoopProcessMessageSuccessPublishesStatusEventPayload(t *testing.T) {
 	q := &fakeQueue{}
-	notifier := &fakeNotifier{}
-	sourceMessageID := int64(77)
-	statusMessageID := int64(88)
+	statusQueue := &fakeQueue{}
 	tasks := &fakeTasks{
 		claimed: true,
 		task: service.Task{
@@ -213,25 +194,15 @@ func TestQueuePullLoopProcessMessageSuccessRefreshesTaskBeforeFinalNotify(t *tes
 			Status:       service.StatusQueued,
 		},
 	}
-	tasks.getTaskFn = func(_ string) (service.Task, error) {
-		return service.Task{
-			TaskID:          tasks.task.TaskID,
-			ChatID:          tasks.task.ChatID,
-			URL:             tasks.task.URL,
-			Status:          service.StatusRunning,
-			SourceMessageID: &sourceMessageID,
-			StatusMessageID: &statusMessageID,
-		}, nil
-	}
 
 	loop := queuePullLoop{
-		logger: slog.Default(),
-		queue:  q,
-		tasks:  tasks,
+		logger:      slog.Default(),
+		queue:       q,
+		statusQueue: statusQueue,
+		tasks:       tasks,
 		runner: fakeRunnerImpl{build: func(ctx context.Context, _ dl.DownloadRequest) (*exec.Cmd, error) {
 			return exec.CommandContext(ctx, "sh", "-c", "echo ok"), nil
 		}},
-		notifier:    notifier,
 		maxAttempts: 3,
 	}
 
@@ -240,18 +211,18 @@ func TestQueuePullLoopProcessMessageSuccessRefreshesTaskBeforeFinalNotify(t *tes
 		Body:    queue.Message{TaskID: "t1"},
 	})
 
-	if len(notifier.tasks) < 2 {
-		t.Fatalf("expected running and done notifications, got %d", len(notifier.tasks))
+	if len(statusQueue.enqueued) < 2 {
+		t.Fatalf("expected running and done status events, got %d", len(statusQueue.enqueued))
 	}
-	finalTask := notifier.tasks[len(notifier.tasks)-1]
-	if finalTask.Status != service.StatusDone {
-		t.Fatalf("expected done notification, got %s", finalTask.Status)
+	finalEvent := statusQueue.enqueued[len(statusQueue.enqueued)-1]
+	if finalEvent.TaskID != "t1" {
+		t.Fatalf("expected task id t1, got %s", finalEvent.TaskID)
 	}
-	if finalTask.SourceMessageID == nil || *finalTask.SourceMessageID != sourceMessageID {
-		t.Fatalf("expected refreshed source message id, got %+v", finalTask.SourceMessageID)
+	if finalEvent.Status != string(service.StatusDone) {
+		t.Fatalf("expected done status, got %s", finalEvent.Status)
 	}
-	if finalTask.StatusMessageID == nil || *finalTask.StatusMessageID != statusMessageID {
-		t.Fatalf("expected refreshed status message id, got %+v", finalTask.StatusMessageID)
+	if finalEvent.UpdatedAt.IsZero() {
+		t.Fatalf("expected non-zero updated_at in status event, got %+v", finalEvent)
 	}
 }
 
@@ -286,9 +257,9 @@ func TestQueuePullLoopProcessMessageNotClaimableAcks(t *testing.T) {
 	}
 }
 
-func TestQueuePullLoopNotifierFailureDoesNotAffectAck(t *testing.T) {
+func TestQueuePullLoopStatusPublishFailureDoesNotAffectAck(t *testing.T) {
 	q := &fakeQueue{}
-	notifier := &fakeNotifier{err: errors.New("notify failed")}
+	statusQueue := &fakeQueue{enqueueErr: errors.New("publish failed")}
 	tasks := &fakeTasks{
 		claimed: true,
 		task: service.Task{
@@ -299,13 +270,13 @@ func TestQueuePullLoopNotifierFailureDoesNotAffectAck(t *testing.T) {
 		},
 	}
 	loop := queuePullLoop{
-		logger: slog.Default(),
-		queue:  q,
-		tasks:  tasks,
+		logger:      slog.Default(),
+		queue:       q,
+		statusQueue: statusQueue,
+		tasks:       tasks,
 		runner: fakeRunnerImpl{build: func(ctx context.Context, _ dl.DownloadRequest) (*exec.Cmd, error) {
 			return exec.CommandContext(ctx, "sh", "-c", "echo ok"), nil
 		}},
-		notifier:    notifier,
 		maxAttempts: 3,
 	}
 

@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"tgdl-bot/internal/queue"
 	"tgdl-bot/internal/service"
 	"tgdl-bot/internal/tasknotify"
 	"tgdl-bot/internal/telegram"
@@ -28,6 +29,8 @@ type fakeTelegramClient struct {
 	deleteWebhookReqs []telegram.DeleteWebhookRequest
 	setWebhookErr     error
 	deleteWebhookErr  error
+	editMessageErr    error
+	reactionErr       error
 }
 
 func (f *fakeTelegramClient) GetUpdates(_ context.Context, req telegram.GetUpdatesRequest) (telegram.GetUpdatesResponse, error) {
@@ -60,12 +63,12 @@ func (f *fakeTelegramClient) SendMessage(_ context.Context, req telegram.SendMes
 
 func (f *fakeTelegramClient) EditMessageText(_ context.Context, req telegram.EditMessageTextRequest) error {
 	f.editedMessages = append(f.editedMessages, req)
-	return nil
+	return f.editMessageErr
 }
 
 func (f *fakeTelegramClient) SetMessageReaction(_ context.Context, _ telegram.SetMessageReactionRequest) error {
 	f.setReactionCalled++
-	return nil
+	return f.reactionErr
 }
 
 func (f *fakeTelegramClient) AnswerCallbackQuery(_ context.Context, req telegram.AnswerCallbackQueryRequest) error {
@@ -453,5 +456,170 @@ func TestRuntimeAnswersCallbackQuery(t *testing.T) {
 	}
 	if client.answeredCallbacks[0].CallbackQueryID != "cb-1" {
 		t.Fatalf("unexpected callback query id: %+v", client.answeredCallbacks[0])
+	}
+}
+
+type fakeStatusQueue struct {
+	acked   []string
+	retried []string
+}
+
+func (f *fakeStatusQueue) Pull(context.Context, int, int) ([]queue.ReceivedMessage, error) {
+	return nil, nil
+}
+
+func (f *fakeStatusQueue) Ack(_ context.Context, leaseIDs []string) error {
+	f.acked = append(f.acked, leaseIDs...)
+	return nil
+}
+
+func (f *fakeStatusQueue) Retry(_ context.Context, leaseIDs []string) error {
+	f.retried = append(f.retried, leaseIDs...)
+	return nil
+}
+
+func TestRuntimeProcessStatusMessageAckOnNotifySuccess(t *testing.T) {
+	sourceID := int64(10)
+	statusID := int64(11)
+	tasks := &fakeTaskQuery{
+		getTaskFn: func(taskID string) (service.Task, error) {
+			if taskID != "task-1" {
+				t.Fatalf("unexpected task id: %s", taskID)
+			}
+			return service.Task{
+				TaskID:          taskID,
+				ChatID:          100,
+				Status:          service.StatusRunning,
+				URL:             "https://t.me/c/1/2",
+				SourceMessageID: &sourceID,
+				StatusMessageID: &statusID,
+			}, nil
+		},
+	}
+	statusQueue := &fakeStatusQueue{}
+	client := &fakeTelegramClient{}
+	runtime := Runtime{
+		Client:      client,
+		Handler:     Handler{Tasks: tasks},
+		StatusQueue: statusQueue,
+	}
+
+	runtime.processStatusMessage(context.Background(), queue.ReceivedMessage{
+		LeaseID: "lease-1",
+		Body: queue.Message{
+			TaskID: "task-1",
+			Status: string(service.StatusRunning),
+		},
+	})
+
+	if len(statusQueue.acked) != 1 || statusQueue.acked[0] != "lease-1" {
+		t.Fatalf("expected lease ack, got %+v", statusQueue.acked)
+	}
+	if len(statusQueue.retried) != 0 {
+		t.Fatalf("expected no retry, got %+v", statusQueue.retried)
+	}
+	if len(client.editedMessages) != 1 {
+		t.Fatalf("expected one status message edit, got %+v", client.editedMessages)
+	}
+	if client.setReactionCalled != 1 {
+		t.Fatalf("expected one source reaction call, got %d", client.setReactionCalled)
+	}
+}
+
+func TestRuntimeProcessStatusMessageRetriesWhenRefsMissing(t *testing.T) {
+	tasks := &fakeTaskQuery{
+		getTaskFn: func(taskID string) (service.Task, error) {
+			return service.Task{
+				TaskID: taskID,
+				Status: service.StatusRunning,
+				URL:    "https://t.me/c/1/2",
+			}, nil
+		},
+	}
+	statusQueue := &fakeStatusQueue{}
+	runtime := Runtime{
+		Client:      &fakeTelegramClient{},
+		Handler:     Handler{Tasks: tasks},
+		StatusQueue: statusQueue,
+	}
+
+	runtime.processStatusMessage(context.Background(), queue.ReceivedMessage{
+		LeaseID: "lease-refs-missing",
+		Body:    queue.Message{TaskID: "task-1"},
+	})
+
+	if len(statusQueue.retried) != 1 || statusQueue.retried[0] != "lease-refs-missing" {
+		t.Fatalf("expected lease retry, got %+v", statusQueue.retried)
+	}
+	if len(statusQueue.acked) != 0 {
+		t.Fatalf("expected no ack, got %+v", statusQueue.acked)
+	}
+}
+
+func TestRuntimeProcessStatusMessageAckWhenTaskNotFound(t *testing.T) {
+	tasks := &fakeTaskQuery{
+		getTaskFn: func(string) (service.Task, error) {
+			return service.Task{}, service.ErrTaskNotFound
+		},
+	}
+	statusQueue := &fakeStatusQueue{}
+	runtime := Runtime{
+		Client:      &fakeTelegramClient{},
+		Handler:     Handler{Tasks: tasks},
+		StatusQueue: statusQueue,
+	}
+
+	runtime.processStatusMessage(context.Background(), queue.ReceivedMessage{
+		LeaseID: "lease-not-found",
+		Body:    queue.Message{TaskID: "task-missing"},
+	})
+
+	if len(statusQueue.acked) != 1 || statusQueue.acked[0] != "lease-not-found" {
+		t.Fatalf("expected lease ack, got %+v", statusQueue.acked)
+	}
+	if len(statusQueue.retried) != 0 {
+		t.Fatalf("expected no retry, got %+v", statusQueue.retried)
+	}
+}
+
+func TestRuntimeProcessStatusMessageRetriesOnTransientNotifyError(t *testing.T) {
+	sourceID := int64(10)
+	statusID := int64(11)
+	tasks := &fakeTaskQuery{
+		getTaskFn: func(taskID string) (service.Task, error) {
+			return service.Task{
+				TaskID:          taskID,
+				ChatID:          100,
+				Status:          service.StatusRunning,
+				URL:             "https://t.me/c/1/2",
+				SourceMessageID: &sourceID,
+				StatusMessageID: &statusID,
+			}, nil
+		},
+	}
+	statusQueue := &fakeStatusQueue{}
+	client := &fakeTelegramClient{
+		editMessageErr: &telegram.APIRequestError{
+			Method:      "editMessageText",
+			Code:        429,
+			Description: "Too Many Requests",
+		},
+	}
+	runtime := Runtime{
+		Client:      client,
+		Handler:     Handler{Tasks: tasks},
+		StatusQueue: statusQueue,
+	}
+
+	runtime.processStatusMessage(context.Background(), queue.ReceivedMessage{
+		LeaseID: "lease-retry",
+		Body:    queue.Message{TaskID: "task-1"},
+	})
+
+	if len(statusQueue.retried) != 1 || statusQueue.retried[0] != "lease-retry" {
+		t.Fatalf("expected lease retry, got %+v", statusQueue.retried)
+	}
+	if len(statusQueue.acked) != 0 {
+		t.Fatalf("expected no ack, got %+v", statusQueue.acked)
 	}
 }

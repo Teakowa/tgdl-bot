@@ -18,7 +18,7 @@ import (
 )
 
 func main() {
-	cfg, err := config.Load()
+	cfg, err := config.LoadForBot()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "load config: %v\n", err)
 		os.Exit(1)
@@ -48,6 +48,7 @@ func run(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 	}
 	taskService := service.NewTaskService(store.TaskRepository())
 	queueClient := queue.NewCloudflareClient(cfg.Cloudflare.AccountID, cfg.Cloudflare.QueueID, cfg.Cloudflare.APIToken, 20*time.Second)
+	statusQueueClient := queue.NewCloudflareClient(cfg.Cloudflare.AccountID, cfg.Cloudflare.StatusQueueID, cfg.Cloudflare.APIToken, 20*time.Second)
 
 	handler := bot.Handler{
 		AllowedUserIDs: cfg.Telegram.AllowedUserIDs,
@@ -62,21 +63,28 @@ func run(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 		"webhook_enabled", cfg.Telegram.UseWebhook,
 		"webhook_configured", cfg.Telegram.WebhookURL != "",
 		"webhook_addr", cfg.Telegram.WebhookListenAddr,
+		"task_queue_id", cfg.Cloudflare.QueueID,
+		"status_queue_id", cfg.Cloudflare.StatusQueueID,
 		"commands", []string{"/start", "/help", "/status", "/last", "/queue", "/delete", "/retry"},
 		"allowlist_size", len(handler.AllowedUserIDs),
 	)
 	client := telegram.NewHTTPClient(cfg.Telegram.APIBase, cfg.Telegram.BotToken, 35*time.Second)
 	runtime := bot.Runtime{
-		Client:         client,
-		Handler:        handler,
-		Logger:         logger,
-		PollInterval:   1200 * time.Millisecond,
-		PollLimit:      50,
-		TimeoutSeconds: 30,
-		UseWebhook:     cfg.Telegram.UseWebhook,
-		WebhookURL:     cfg.Telegram.WebhookURL,
-		WebhookSecret:  cfg.Telegram.WebhookSecret,
-		WebhookAddr:    cfg.Telegram.WebhookListenAddr,
+		Client:                    client,
+		Handler:                   handler,
+		Logger:                    logger,
+		PollInterval:              1200 * time.Millisecond,
+		PollLimit:                 50,
+		TimeoutSeconds:            30,
+		UseWebhook:                cfg.Telegram.UseWebhook,
+		WebhookURL:                cfg.Telegram.WebhookURL,
+		WebhookSecret:             cfg.Telegram.WebhookSecret,
+		WebhookAddr:               cfg.Telegram.WebhookListenAddr,
+		StatusQueue:               statusQueueClient,
+		StatusQueueBatchSize:      cfg.Cloudflare.QueueBatchSize,
+		StatusQueuePullInterval:   time.Duration(cfg.Cloudflare.QueuePullIntervalMS) * time.Millisecond,
+		StatusQueueVisibilityMs:   cfg.Cloudflare.QueueVisibilityTimeoutMS,
+		StatusNotificationTimeout: 8 * time.Second,
 	}
 	return runtime.Run(ctx)
 }
