@@ -81,10 +81,18 @@ docker compose -f deploy/docker-compose.yml pull && docker compose -f deploy/doc
 ### 2. Local/dev start with build override
 
 ```bash
-docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.build.yml up -d --build
+docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.build.yml build --pull
+docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.build.yml up -d
 ```
 
 `deploy/docker-compose.build.yml` adds local build instructions and overrides images to `tgdl-bot:local` / `tgdl-downloader:local`.
+
+For a fully clean rebuild (refresh base images and ignore local build cache):
+
+```bash
+docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.build.yml build --pull --no-cache
+docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.build.yml up -d
+```
 
 ### 3. Initialize tdl session in container context (first deployment only)
 

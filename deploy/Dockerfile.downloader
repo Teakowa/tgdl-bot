@@ -1,16 +1,22 @@
+# syntax=docker/dockerfile:1.7
+
 FROM golang:1.24-bookworm AS builder
 
 WORKDIR /src
 
 COPY go.mod go.sum ./
-RUN go mod download
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    go mod download
 
 COPY . .
 
 ARG TARGETOS
 ARG TARGETARCH
 
-RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH:-amd64} \
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH:-amd64} \
     go build -trimpath -ldflags="-s -w" -o /out/tgdl-downloader ./cmd/downloader
 
 FROM debian:bookworm-slim AS tdl-installer
@@ -19,7 +25,10 @@ ARG TARGETARCH
 ARG TDL_VERSION=v0.20.1
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates curl tar \
+    && apt-get install -y --no-install-recommends \
+        ca-certificates \
+        curl \
+        tar \
     && rm -rf /var/lib/apt/lists/*
 
 RUN set -eux; \
@@ -28,7 +37,8 @@ RUN set -eux; \
       arm64) asset="tdl_Linux_arm64.tar.gz" ;; \
       *) echo "unsupported TARGETARCH: ${TARGETARCH}" >&2; exit 1 ;; \
     esac; \
-    curl -fsSL "https://github.com/iyear/tdl/releases/download/${TDL_VERSION}/${asset}" -o /tmp/tdl.tar.gz; \
+    curl --connect-timeout 15 --fail --location --retry 5 --retry-all-errors --retry-delay 2 --show-error --silent \
+      "https://github.com/iyear/tdl/releases/download/${TDL_VERSION}/${asset}" -o /tmp/tdl.tar.gz; \
     tar -xzf /tmp/tdl.tar.gz -C /tmp; \
     install -m 0755 /tmp/tdl /usr/local/bin/tdl; \
     rm -rf /tmp/tdl /tmp/tdl.tar.gz

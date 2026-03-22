@@ -70,6 +70,7 @@ jobs:
           context: .
           file: deploy/Dockerfile.bot
           platforms: linux/amd64,linux/arm64
+          pull: true
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.meta_bot.outputs.tags }}
           labels: ${{ steps.meta_bot.outputs.labels }}
@@ -84,6 +85,7 @@ jobs:
           platforms: linux/amd64,linux/arm64
           build-args: |
             TDL_VERSION=v0.20.1
+          pull: true
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.meta_downloader.outputs.tags }}
           labels: ${{ steps.meta_downloader.outputs.labels }}
