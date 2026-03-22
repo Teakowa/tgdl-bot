@@ -1,27 +1,12 @@
 # DEPLOY
 
-Authoritative split-compose workflow by environment.
+Authoritative compose workflow by environment.
 
-This guide uses split compose only (`bot` and `downloader` compose files).
+## Strategy
 
-## Compose strategy
-
-- `prod`: use GHCR images from base compose files (no build override).
-- `dev`: use local images from build override files (`*.build.yml`).
-- Start modes:
-  - `combined`: start `bot + downloader` in one command set
-  - `single`: start `bot` and `downloader` separately
-
-## Compose file sets
-
-| Environment + mode | Compose files |
-| --- | --- |
-| `prod + combined` | `deploy/docker-compose.bot.yml` + `deploy/docker-compose.downloader.yml` |
-| `prod + single (bot)` | `deploy/docker-compose.bot.yml` |
-| `prod + single (downloader)` | `deploy/docker-compose.downloader.yml` |
-| `dev + combined` | `deploy/docker-compose.bot.yml` + `deploy/docker-compose.bot.build.yml` + `deploy/docker-compose.downloader.yml` + `deploy/docker-compose.downloader.build.yml` |
-| `dev + single (bot)` | `deploy/docker-compose.bot.yml` + `deploy/docker-compose.bot.build.yml` |
-| `dev + single (downloader)` | `deploy/docker-compose.downloader.yml` + `deploy/docker-compose.downloader.build.yml` |
+- `prod`: use GHCR images and deploy `bot` / `downloader` independently.
+- `dev`: use local build images and start both services through one compose context.
+- This guide intentionally treats independent deployment as a production concern.
 
 ## Common prerequisites
 
@@ -33,9 +18,9 @@ cp .env.example .env
 
 Fill `.env` with Telegram and Cloudflare credentials.
 
-### 2. Configure tags for `prod`
+### 2. Configure tags for `prod` in `.env`
 
-Pin image tags in `.env`:
+Pin to release tags or immutable `sha-*` tags:
 
 ```bash
 BOT_IMAGE_TAG=sha-<git-sha>
@@ -50,66 +35,76 @@ If GHCR images are private, log in before `pull`:
 docker login ghcr.io
 ```
 
-## prod (GHCR images)
+## prod workflow (independent deployment)
 
-### Combined
-
-```bash
-docker compose -f deploy/docker-compose.bot.yml -f deploy/docker-compose.downloader.yml pull
-docker compose -f deploy/docker-compose.bot.yml -f deploy/docker-compose.downloader.yml up -d
-```
-
-### Single
-
-```bash
-docker compose -f deploy/docker-compose.bot.yml pull
-docker compose -f deploy/docker-compose.bot.yml up -d
-
-docker compose -f deploy/docker-compose.downloader.yml pull
-docker compose -f deploy/docker-compose.downloader.yml up -d
-```
-
-### `tdl login` bootstrap (prod downloader context)
+### 1. Initialize downloader session (first deployment on the target host)
 
 ```bash
 docker compose -f deploy/docker-compose.downloader.yml run --rm --entrypoint /usr/local/bin/tdl downloader login -T qr -n default
 ```
 
-### Scale downloader (optional)
+### 2. Deploy bot service
+
+```bash
+docker compose -f deploy/docker-compose.bot.yml pull
+docker compose -f deploy/docker-compose.bot.yml up -d
+```
+
+### 3. Deploy downloader service
+
+```bash
+docker compose -f deploy/docker-compose.downloader.yml pull
+docker compose -f deploy/docker-compose.downloader.yml up -d
+```
+
+### 4. Scale downloader (optional)
 
 ```bash
 docker compose -f deploy/docker-compose.downloader.yml up -d --scale downloader=3
 ```
 
-## dev (local build images)
+## dev workflow (one compose context for both services)
 
-### Combined
+### 1. Set a short compose context
 
 ```bash
-docker compose -f deploy/docker-compose.bot.yml -f deploy/docker-compose.bot.build.yml -f deploy/docker-compose.downloader.yml -f deploy/docker-compose.downloader.build.yml build --pull
-docker compose -f deploy/docker-compose.bot.yml -f deploy/docker-compose.bot.build.yml -f deploy/docker-compose.downloader.yml -f deploy/docker-compose.downloader.build.yml up -d
+export COMPOSE_FILE=deploy/docker-compose.bot.yml:deploy/docker-compose.bot.build.yml:deploy/docker-compose.downloader.yml:deploy/docker-compose.downloader.build.yml
 ```
 
-### Single
+### 2. Initialize downloader session in the same context (first time)
 
 ```bash
-docker compose -f deploy/docker-compose.bot.yml -f deploy/docker-compose.bot.build.yml build --pull
-docker compose -f deploy/docker-compose.bot.yml -f deploy/docker-compose.bot.build.yml up -d
-
-docker compose -f deploy/docker-compose.downloader.yml -f deploy/docker-compose.downloader.build.yml build --pull
-docker compose -f deploy/docker-compose.downloader.yml -f deploy/docker-compose.downloader.build.yml up -d
+docker compose run --rm --entrypoint /usr/local/bin/tdl downloader login -T qr -n default
 ```
 
-### `tdl login` bootstrap (dev downloader context)
+### 3. Build and start both services
 
 ```bash
-docker compose -f deploy/docker-compose.downloader.yml -f deploy/docker-compose.downloader.build.yml run --rm --entrypoint /usr/local/bin/tdl downloader login -T qr -n default
+docker compose build --pull
+docker compose up -d
 ```
 
-### Scale downloader (optional)
+### 4. Verify runtime
 
 ```bash
-docker compose -f deploy/docker-compose.downloader.yml -f deploy/docker-compose.downloader.build.yml up -d --scale downloader=3
+docker compose ps
+docker compose logs --tail=80 downloader
+```
+
+### 5. Scale downloader (optional)
+
+```bash
+docker compose up -d --scale downloader=3
+```
+
+## Compose wiring checks
+
+Expected service resolution:
+
+```bash
+docker compose -f deploy/docker-compose.bot.yml config --services
+docker compose -f deploy/docker-compose.downloader.yml config --services
+COMPOSE_FILE=deploy/docker-compose.bot.yml:deploy/docker-compose.bot.build.yml:deploy/docker-compose.downloader.yml:deploy/docker-compose.downloader.build.yml docker compose config --services
 ```
 
 ## Operational notes
