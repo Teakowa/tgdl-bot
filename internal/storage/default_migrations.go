@@ -41,5 +41,9 @@ ALTER TABLE tasks ADD COLUMN IF NOT EXISTS drop_caption INTEGER NOT NULL DEFAULT
 UPDATE tasks
 SET target_peer = ''
 WHERE target_peer IS NULL;`,
+	}, {
+		Name: "003_stale_running_index.sql",
+		SQL: `CREATE INDEX IF NOT EXISTS idx_tasks_status_started_at
+  ON tasks(status, started_at);`,
 	}}
 }

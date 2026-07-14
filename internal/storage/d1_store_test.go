@@ -26,6 +26,18 @@ func TestParseConditionalAddColumnStatement(t *testing.T) {
 	}
 }
 
+func TestDefaultMigrationsIncludeStaleRunningIndex(t *testing.T) {
+	for _, migration := range DefaultMigrations() {
+		if migration.Name == "003_stale_running_index.sql" {
+			if migration.SQL != "CREATE INDEX IF NOT EXISTS idx_tasks_status_started_at\n  ON tasks(status, started_at);" {
+				t.Fatalf("unexpected stale running index migration SQL: %q", migration.SQL)
+			}
+			return
+		}
+	}
+	t.Fatal("stale running index migration is missing")
+}
+
 func TestD1StoreApplyMigrationsSkipsExistingColumns(t *testing.T) {
 	var queries []string
 

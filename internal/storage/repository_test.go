@@ -559,10 +559,13 @@ func TestD1TaskRepositoryListStaleRunningUsesStartedAtThreshold(t *testing.T) {
 	if !ok {
 		t.Fatalf("unexpected sql payload: %#v", payload["sql"])
 	}
-	for _, want := range []string{"status = ?", "started_at IS NOT NULL", "started_at <= ?"} {
+	for _, want := range []string{"SELECT task_id", "status = ?", "started_at IS NOT NULL", "started_at <= ?", "ORDER BY started_at ASC", "LIMIT ?"} {
 		if !strings.Contains(sqlValue, want) {
 			t.Fatalf("expected sql to contain %q, got: %s", want, sqlValue)
 		}
+	}
+	if strings.Contains(sqlValue, "url") || strings.Contains(sqlValue, "error_message") {
+		t.Fatalf("stale running query selected unrelated task fields: %s", sqlValue)
 	}
 }
 

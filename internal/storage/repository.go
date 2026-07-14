@@ -503,9 +503,7 @@ func (r *D1TaskRepository) ListStaleRunning(ctx context.Context, startedBefore t
 	}
 
 	result, err := r.Client.Query(ctx, `
-		SELECT task_id, chat_id, user_id, target_peer, url, drop_caption, status, idempotency_key,
-		       retry_count, source_message_id, status_message_id, lease_id, output_summary, error_message, exit_code,
-		       created_at, updated_at, started_at, finished_at
+		SELECT task_id
 		FROM tasks
 		WHERE status = ?
 		  AND started_at IS NOT NULL
@@ -522,11 +520,11 @@ func (r *D1TaskRepository) ListStaleRunning(ctx context.Context, startedBefore t
 
 	tasks := make([]service.Task, 0, len(result.Results))
 	for _, row := range result.Results {
-		task, err := taskFromResultRow(row)
+		taskID, err := mustString(row, "task_id")
 		if err != nil {
-			return nil, fmt.Errorf("storage: decode stale running task row: %w", err)
+			return nil, fmt.Errorf("storage: decode stale running task id: %w", err)
 		}
-		tasks = append(tasks, task)
+		tasks = append(tasks, service.Task{TaskID: taskID})
 	}
 	return tasks, nil
 }
